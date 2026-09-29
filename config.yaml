@@ -1,0 +1,18 @@
+site:
+  name: "Successful Hedge Fund Investment Tracker"
+
+sec:
+  user_agent_env: "SEC_USER_AGENT"
+  request_delay_seconds: 0.25
+  data_api_base: "https://data.sec.gov"
+  archives_base: "https://www.sec.gov/Archives/edgar/data"
+
+funds:
+  - {slug: citadel, name: Citadel, founded_year: 1990}
+  - {slug: de-shaw, name: D.E. Shaw, founded_year: 1988}
+  - {slug: millennium, name: Millennium, founded_year: 1989}
+  - {slug: tci, name: TCI, founded_year: 2003}
+  - {slug: pershing-square, name: Pershing Square, founded_year: 2003}
+  - {slug: elliott, name: Elliott, founded_year: 1977}
+  - {slug: aqr, name: AQR, founded_year: 1998}
+  - {slug: lone-pine, name: Lone Pine, founded_year: 1997}
