@@ -108,9 +108,10 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing):
     return len(holdings)
 
 
-def ingest_fund(client, fund_slug: str, limit: int = 1):
+def ingest_fund(client, fund_slug: str, limit: int = 1) -> list[str]:
     initialize_database()
     entities = [e for e in SEC_ENTITIES[fund_slug] if e.get("include_in_13f", e.get("role") == "primary")]
+    errors = []
     with connect() as conn:
         fund = conn.execute("SELECT id FROM funds WHERE slug = ?", (fund_slug,)).fetchone()
         if not fund:
@@ -126,14 +127,28 @@ def ingest_fund(client, fund_slug: str, limit: int = 1):
             if limit:
                 filings = filings[:limit]
             for filing in filings:
+                # Keep one malformed SEC filing from preventing the other
+                # tracked funds/filings from being processed. Each filing gets
+                # its own savepoint so a partial insert cannot leak into the
+                # database when parsing fails.
+                savepoint = "ingest_filing"
+                conn.execute(f"SAVEPOINT {savepoint}")
                 try:
                     ingest_one(client, conn, fund_id, fund_slug, filing)
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+                    conn.commit()
                 except Exception as exc:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")
                     conn.execute(
                         "INSERT INTO ingestion_log (source, accession_number, status, message) VALUES (?, ?, ?, ?)",
                         ("SEC 13F", filing.accession_number, "error", str(exc)),
                     )
-                    raise
+                    conn.commit()
+                    errors.append(f"{fund_slug} {filing.accession_number}: {exc}")
+                    print(f"ERROR: {errors[-1]}")
+
+    return errors
 
 
 def main():
@@ -144,10 +159,17 @@ def main():
 
     client = SECClient()
     funds = args.fund or sorted(SEC_ENTITIES)
+    errors = []
     for fund_slug in funds:
         print(f"Ingesting {fund_slug}...")
-        ingest_fund(client, fund_slug, limit=None if args.all else 1)
+        errors.extend(ingest_fund(client, fund_slug, limit=None if args.all else 1))
         print(f"Finished {fund_slug}.")
+
+    if errors:
+        print("\nSEC ingestion completed with errors:")
+        for error in errors:
+            print(f" - {error}")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
