@@ -74,7 +74,20 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
         description = " ".join(c.get_text(" ", strip=True) for c in cells).upper()
         if "INFORMATION TABLE" not in description:
             continue
-        link = row.find("a", href=True)
+        # A 13F INFORMATION TABLE row normally contains both infotable.html
+        # and infotable.xml. Prefer the XML document explicitly; choosing the
+        # first link can accidentally select the HTML rendering, which has no
+        # XML infoTable elements for our parser to read.
+        links = row.find_all("a", href=True)
+        link = next(
+            (a for a in links if a["href"].lower().split("?", 1)[0].endswith(".xml")),
+            None,
+        )
+        if link is None:
+            link = next(
+                (a for a in links if "infotable" in a["href"].lower()),
+                None,
+            )
         if link:
             href = link["href"]
             if href.startswith("/"):
