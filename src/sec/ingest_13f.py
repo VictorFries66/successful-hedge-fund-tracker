@@ -23,18 +23,42 @@ def save_bytes(path: Path, data: bytes):
 
 
 def get_or_create_security(conn, holding):
+    cusip_row = None
+    figi_row = None
+
     if holding.cusip:
-        row = conn.execute("SELECT id FROM securities WHERE cusip = ?", (holding.cusip,)).fetchone()
-        if row:
-            conn.execute(
-                "UPDATE securities SET company_name=?, figi=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (holding.issuer_name, holding.figi, row[0]),
-            )
-            return row[0]
+        cusip_row = conn.execute(
+            "SELECT id, figi FROM securities WHERE cusip = ?",
+            (holding.cusip,),
+        ).fetchone()
+
     if holding.figi:
-        row = conn.execute("SELECT id FROM securities WHERE figi = ?", (holding.figi,)).fetchone()
-        if row:
-            return row[0]
+        figi_row = conn.execute(
+            "SELECT id FROM securities WHERE figi = ?",
+            (holding.figi,),
+        ).fetchone()
+
+    if cusip_row:
+        security_id = cusip_row[0]
+
+        # A security's CUSIP is the stronger existing identity here. If an
+        # incoming FIGI belongs to a different existing security row, do not
+        # overwrite that row's FIGI and violate the UNIQUE(figi) constraint.
+        if not cusip_row[1] and not figi_row:
+            conn.execute(
+                "UPDATE securities SET figi=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (holding.figi, security_id),
+            )
+
+        conn.execute(
+            "UPDATE securities SET company_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (holding.issuer_name, security_id),
+        )
+        return security_id
+
+    if figi_row:
+        return figi_row[0]
+
     cur = conn.execute(
         "INSERT INTO securities (company_name, cusip, figi) VALUES (?, ?, ?)",
         (holding.issuer_name, holding.cusip, holding.figi),
