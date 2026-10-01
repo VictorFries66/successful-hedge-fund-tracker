@@ -98,7 +98,7 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing):
         else:
             info_bytes = client.get(filing.information_table_url).content
             save_bytes(info_path, info_bytes)
-        holdings = parse_information_table(info_bytes)
+        value_multiplier = 1 if filing.reporting_date >= "2023-01-01" else 1000\n        holdings = parse_information_table(info_bytes, value_multiplier=value_multiplier)
     else:
         # Pre-2013 13F-HR filings used legacy plaintext information tables.
         # Preserve the complete submission and a copy under an explicit legacy
