@@ -148,6 +148,27 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
             break
 
     if not info_url:
+        # Older EDGAR filings sometimes use a different table layout. Fall
+        # back to scanning all document links for the raw information-table
+        # XML, while excluding the cover-page XML and XSL-rendered XML.
+        for link in soup.find_all("a", href=True):
+            href = link["href"]
+            normalized = href.lower().split("?", 1)[0]
+            if not normalized.endswith(".xml"):
+                continue
+            if "xslform13f_" in normalized:
+                continue
+            if normalized.endswith("/primary_doc.xml") or normalized.endswith("primary_doc.xml"):
+                continue
+            if href.startswith("/"):
+                info_url = "https://www.sec.gov" + href
+            elif href.startswith("http"):
+                info_url = href
+            else:
+                info_url = filing.index_url.rsplit("/", 1)[0] + "/" + href
+            break
+
+    if not info_url:
         raise RuntimeError(
             f"Could not locate raw information table XML for "
             f"{filing.accession_number}"
