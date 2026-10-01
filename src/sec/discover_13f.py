@@ -33,31 +33,72 @@ def filing_index_url(cik: str, accession: str) -> str:
     )
 
 
-def discover_13f(client: SECClient, cik: str, limit: Optional[int] = None) -> list[FilingRecord]:
-    data = client.get_json(submissions_url(cik))
+def _filing_records_from_submissions(cik: str, data: dict) -> list[FilingRecord]:
     recent = data.get("filings", {}).get("recent", {})
     records = []
 
     for i, form in enumerate(recent.get("form", [])):
         if form not in {"13F-HR", "13F-HR/A"}:
             continue
+
         accession = recent["accessionNumber"][i]
         filing_date = recent["filingDate"][i]
         reporting_date = recent["reportDate"][i]
         primary_document = recent["primaryDocument"][i]
         index_url = filing_index_url(cik, accession)
-        records.append(FilingRecord(
-            cik=f"{int(cik):010d}",
-            accession_number=accession,
-            filing_date=filing_date,
-            reporting_date=reporting_date,
-            form_type=form,
-            primary_document=primary_document,
-            sec_url=index_url,
-            index_url=index_url,
-        ))
-        if limit and len(records) >= limit:
-            break
+
+        records.append(
+            FilingRecord(
+                cik=f"{int(cik):010d}",
+                accession_number=accession,
+                filing_date=filing_date,
+                reporting_date=reporting_date,
+                form_type=form,
+                primary_document=primary_document,
+                sec_url=index_url,
+                index_url=index_url,
+            )
+        )
+
+    return records
+
+
+def discover_13f(client: SECClient, cik: str, limit: Optional[int] = None) -> list[FilingRecord]:
+    """Discover 13F-HR/HRA filings across the complete SEC submission history.
+
+    The main submissions JSON contains a recent filing history and, when older
+    filings exist, references additional historical JSON files in
+    "filings.files". We load both sources so limit=None really means all
+    available 13F filings for the CIK.
+    """
+    data = client.get_json(submissions_url(cik))
+    records = _filing_records_from_submissions(cik, data)
+
+    # The SEC submissions endpoint keeps the most recent filings in the main
+    # JSON and exposes older history through separate JSON files.
+    for historical_file in data.get("filings", {}).get("files", []):
+        name = historical_file.get("name")
+        if not name:
+            continue
+
+        historical_url = f"https://data.sec.gov/submissions/{name}"
+        historical_data = client.get_json(historical_url)
+        records.extend(_filing_records_from_submissions(cik, historical_data))
+
+    # Historical files and the recent section can overlap. Deduplicate by
+    # accession number so each filing is ingested only once.
+    unique = {}
+    for record in records:
+        unique[record.accession_number] = record
+
+    records = list(unique.values())
+    records.sort(
+        key=lambda f: (f.reporting_date, f.filing_date, f.form_type),
+        reverse=True,
+    )
+
+    if limit:
+        records = records[:limit]
 
     return records
 
