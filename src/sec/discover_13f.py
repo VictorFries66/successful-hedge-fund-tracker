@@ -67,37 +67,51 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
     soup = BeautifulSoup(html, "html.parser")
 
     info_url = None
+
+    # SEC filing indexes may contain multiple INFORMATION TABLE rows:
+    # one for the XSL-rendered document and one for the raw XML.
+    # Select the direct/root-level XML and ignore XSL-rendered XML.
     for row in soup.select("table.tableFile tr"):
         cells = row.find_all("td")
         if not cells:
             continue
-        description = " ".join(c.get_text(" ", strip=True) for c in cells).upper()
+
+        description = " ".join(
+            c.get_text(" ", strip=True) for c in cells
+        ).upper()
+
         if "INFORMATION TABLE" not in description:
             continue
-        # The SEC filing index may expose the XSL-rendered
-        # xslForm13F_X02/infotable.xml instead of the raw XML.
-        # Construct the raw information-table URL directly.
-        accession_dir = filing.index_url.rsplit("/", 1)[0]
-        info_url = accession_dir + "/infotable.xml"
-        break
+
+        for link in row.find_all("a", href=True):
+            href = link["href"]
+            normalized = href.lower().split("?", 1)[0]
+
+            if not normalized.endswith(".xml"):
+                continue
+            if "xslform13f_" in normalized:
+                continue
+
+            if href.startswith("/"):
+                info_url = "https://www.sec.gov" + href
+            elif href.startswith("http"):
+                info_url = href
+            else:
+                info_url = filing.index_url.rsplit("/", 1)[0] + "/" + href
+
+            break
+
+        # Do NOT break merely because an INFORMATION TABLE row was found.
+        # Continue until we find the direct/root-level XML.
+        if info_url:
+            break
 
     if not info_url:
-        # Some EDGAR index layouts expose the information table in the raw HTML
-        # without a description cell. Search links as a fallback.
-        for link in soup.find_all("a", href=True):
-            text = link.get_text(" ", strip=True).lower()
-            href = link["href"].lower()
-            if "information" in text or "infotable" in href or "informationtable" in href:
-                target = link["href"]
-                if target.startswith("/"):
-                    info_url = "https://www.sec.gov" + target
-                elif target.startswith("http"):
-                    info_url = target
-                else:
-                    info_url = filing.index_url.rsplit("/", 1)[0] + "/" + target
-                break
+        raise RuntimeError(
+            f"Could not locate raw information table XML for "
+            f"{filing.accession_number}"
+        )
 
-    if not info_url:
-        raise RuntimeError(f"Could not locate information table for {filing.accession_number}")
-
-    return FilingRecord(**{**filing.__dict__, "information_table_url": info_url})
+    return FilingRecord(
+        **{**filing.__dict__, "information_table_url": info_url}
+    )
