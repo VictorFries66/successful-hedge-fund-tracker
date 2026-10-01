@@ -63,12 +63,12 @@ def get_or_create_security(conn, holding):
     return cur.lastrowid
 
 
-def ingest_one(client, conn, fund_id: int, fund_slug: str, filing):
+def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool = False):
     existing = conn.execute(
         "SELECT id, filing_status FROM filings_13f WHERE accession_number = ?",
         (filing.accession_number,),
     ).fetchone()
-    if existing and existing["filing_status"] == "parsed":
+    if existing and existing["filing_status"] == "parsed" and not reparse:
         return 0
 
     filing = locate_information_table(client, filing)
@@ -163,7 +163,7 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing):
     return len(holdings)
 
 
-def ingest_fund(client, fund_slug: str, limit: int = 1) -> list[str]:
+def ingest_fund(client, fund_slug: str, limit: int = 1, reparse: bool = False) -> list[str]:
     initialize_database()
     entities = [e for e in SEC_ENTITIES[fund_slug] if e.get("include_in_13f", e.get("role") == "primary")]
     errors = []
@@ -183,7 +183,7 @@ def ingest_fund(client, fund_slug: str, limit: int = 1) -> list[str]:
                 savepoint = "ingest_filing"
                 conn.execute(f"SAVEPOINT {savepoint}")
                 try:
-                    ingest_one(client, conn, fund_id, fund_slug, filing)
+                    ingest_one(client, conn, fund_id, fund_slug, filing, reparse=reparse)
                     conn.execute(f"RELEASE SAVEPOINT {savepoint}")
                     conn.commit()
                 except Exception as exc:
@@ -204,6 +204,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--fund", choices=sorted(SEC_ENTITIES), action="append")
     parser.add_argument("--all", action="store_true", help="Process all discovered 13F-HR/HRA filings instead of latest only.")
+    parser.add_argument("--reparse", action="store_true", help="Re-download/parse filings already marked parsed. Use with --all to rebuild historical data with the current parser.")
     args = parser.parse_args()
 
     client = SECClient()
