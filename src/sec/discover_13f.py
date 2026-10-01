@@ -1,6 +1,7 @@
 """Discover 13F filings from SEC submissions JSON."""
 
 from dataclasses import dataclass
+import re
 from typing import Optional
 
 from bs4 import BeautifulSoup
@@ -103,6 +104,51 @@ def discover_13f(client: SECClient, cik: str, limit: Optional[int] = None) -> li
     return records
 
 
+def _resolve_document_url(filing: FilingRecord, href: str) -> str:
+    if href.startswith("/"):
+        return "https://www.sec.gov" + href
+    if href.startswith("http"):
+        return href
+    return filing.index_url.rsplit("/", 1)[0] + "/" + href
+
+
+def _information_table_from_submission(client: SECClient, filing: FilingRecord) -> Optional[str]:
+    """Find the information-table filename from the SEC submission text.
+
+    This is especially important for older EDGAR filings. Their filing index
+    can have a legacy layout, while the complete submission text explicitly
+    identifies the INFORMATION TABLE document and its FILENAME.
+    """
+    submission_url = filing.index_url.replace("-index.html", ".txt")
+    response = client.get(submission_url)
+    text = response.text
+
+    # SEC submission text uses SGML-style DOCUMENT blocks. Look for the
+    # document whose TYPE is INFORMATION TABLE and return its filename.
+    for block in re.findall(
+        r"<DOCUMENT>(.*?)(?=<DOCUMENT>|</SEC-DOCUMENT>)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        doc_type = re.search(
+            r"<TYPE>\s*([^\r\n<]+)", block, flags=re.IGNORECASE
+        )
+        filename = re.search(
+            r"<FILENAME>\s*([^\r\n<]+)", block, flags=re.IGNORECASE
+        )
+        if not doc_type or not filename:
+            continue
+        if doc_type.group(1).strip().upper() != "INFORMATION TABLE":
+            continue
+
+        name = filename.group(1).strip()
+        normalized = name.lower().split("?", 1)[0]
+        if normalized.endswith(".xml") and "xslform13f_" not in normalized:
+            return _resolve_document_url(filing, name)
+
+    return None
+
+
 def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingRecord:
     html = client.get(filing.index_url).text
     soup = BeautifulSoup(html, "html.parser")
@@ -133,24 +179,15 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
             if "xslform13f_" in normalized:
                 continue
 
-            if href.startswith("/"):
-                info_url = "https://www.sec.gov" + href
-            elif href.startswith("http"):
-                info_url = href
-            else:
-                info_url = filing.index_url.rsplit("/", 1)[0] + "/" + href
-
+            info_url = _resolve_document_url(filing, href)
             break
 
-        # Do NOT break merely because an INFORMATION TABLE row was found.
-        # Continue until we find the direct/root-level XML.
         if info_url:
             break
 
     if not info_url:
-        # Older EDGAR filings sometimes use a different table layout. Fall
-        # back to scanning all document links for the raw information-table
-        # XML, while excluding the cover-page XML and XSL-rendered XML.
+        # Older EDGAR filing indexes sometimes use a different table layout.
+        # Scan all document links for the raw information-table XML.
         for link in soup.find_all("a", href=True):
             href = link["href"]
             normalized = href.lower().split("?", 1)[0]
@@ -160,36 +197,19 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
                 continue
             if normalized.endswith("/primary_doc.xml") or normalized.endswith("primary_doc.xml"):
                 continue
-            if href.startswith("/"):
-                info_url = "https://www.sec.gov" + href
-            elif href.startswith("http"):
-                info_url = href
-            else:
-                info_url = filing.index_url.rsplit("/", 1)[0] + "/" + href
+
+            info_url = _resolve_document_url(filing, href)
             break
 
     if not info_url:
-        # Some older EDGAR filing indexes do not expose the raw information
-        # table as a normal document link. The underlying filing directory
-        # still uses predictable legacy names, so try those names directly.
-        filing_dir = filing.index_url.rsplit("/", 1)[0]
-        candidate_names = (
-            "form13fInfoTable.xml",
-            "infotable.xml",
-            "informationtable.xml",
-            "informationTable.xml",
-        )
-
-        for name in candidate_names:
-            candidate_url = f"{filing_dir}/{name}"
-            try:
-                response = client.get(candidate_url)
-            except Exception:
-                continue
-
-            if response.ok:
-                info_url = candidate_url
-                break
+        # The complete submission text is authoritative for legacy EDGAR
+        # filings because its DOCUMENT block names the exact information-table
+        # file, even when the filing index does not expose it in a standard
+        # table layout.
+        try:
+            info_url = _information_table_from_submission(client, filing)
+        except Exception:
+            info_url = None
 
     if not info_url:
         raise RuntimeError(
