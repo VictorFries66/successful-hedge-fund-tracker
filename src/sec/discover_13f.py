@@ -169,6 +169,29 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
             break
 
     if not info_url:
+        # Some older EDGAR filing indexes do not expose the raw information
+        # table as a normal document link. The underlying filing directory
+        # still uses predictable legacy names, so try those names directly.
+        filing_dir = filing.index_url.rsplit("/", 1)[0]
+        candidate_names = (
+            "form13fInfoTable.xml",
+            "infotable.xml",
+            "informationtable.xml",
+            "informationTable.xml",
+        )
+
+        for name in candidate_names:
+            candidate_url = f"{filing_dir}/{name}"
+            try:
+                response = client.get(candidate_url)
+            except Exception:
+                continue
+
+            if response.ok:
+                info_url = candidate_url
+                break
+
+    if not info_url:
         raise RuntimeError(
             f"Could not locate raw information table XML for "
             f"{filing.accession_number}"
