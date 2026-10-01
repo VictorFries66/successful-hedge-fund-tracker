@@ -75,7 +75,7 @@ def _parse_root(xml_bytes: bytes):
         return root
 
 
-def parse_information_table(xml_bytes: bytes) -> list[HoldingRecord]:
+def parse_information_table(xml_bytes: bytes, value_multiplier: int = 1) -> list[HoldingRecord]:
     root = _parse_root(xml_bytes)
     records = []
     raw_hash = hashlib.sha256(xml_bytes).hexdigest()
@@ -93,7 +93,7 @@ def parse_information_table(xml_bytes: bytes) -> list[HoldingRecord]:
             title_of_class=child_text(element, "titleOfClass"),
             cusip=child_text(element, "cusip"),
             figi=child_text(element, "figi"),
-            value_dollars=integer(child_text(element, "value")),
+            value_dollars=(integer(child_text(element, "value")) * value_multiplier\n                          if integer(child_text(element, "value")) is not None else None),
             shares_or_principal=integer(child_text(element, "sshPrnamt")),
             shares_or_principal_type=child_text(element, "sshPrnamtType"),
             put_call=child_text(element, "putCall"),
