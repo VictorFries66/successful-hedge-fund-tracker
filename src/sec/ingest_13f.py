@@ -43,17 +43,41 @@ def get_or_create_security(conn, holding):
 
 
 def ingest_one(client, conn, fund_id: int, fund_slug: str, filing):
+    # If this accession is already parsed, keep the existing raw files and
+    # holdings. This makes historical ingestion safe to resume and avoids
+    # redownloading filings already present in the database.
+    existing = conn.execute(
+        "SELECT id, filing_status FROM filings_13f WHERE accession_number = ?",
+        (filing.accession_number,),
+    ).fetchone()
+    if existing and existing["filing_status"] == "parsed":
+        return 0
+
     filing = locate_information_table(client, filing)
     folder = raw_dir(fund_slug, filing.reporting_date, filing.accession_number)
 
-    index_bytes = client.get(filing.index_url).content
-    info_bytes = client.get(filing.information_table_url).content
-    submission_url = filing.index_url.replace("-index.html", ".txt")
-    submission_bytes = client.get(submission_url).content
+    index_path = folder / "filing-index.html"
+    info_path = folder / "information-table.xml"
+    submission_path = folder / "submission.txt"
 
-    save_bytes(folder / "filing-index.html", index_bytes)
-    save_bytes(folder / "information-table.xml", info_bytes)
-    save_bytes(folder / "submission.txt", submission_bytes)
+    if index_path.exists():
+        index_bytes = index_path.read_bytes()
+    else:
+        index_bytes = client.get(filing.index_url).content
+        save_bytes(index_path, index_bytes)
+
+    if info_path.exists():
+        info_bytes = info_path.read_bytes()
+    else:
+        info_bytes = client.get(filing.information_table_url).content
+        save_bytes(info_path, info_bytes)
+
+    if submission_path.exists():
+        submission_bytes = submission_path.read_bytes()
+    else:
+        submission_url = filing.index_url.replace("-index.html", ".txt")
+        submission_bytes = client.get(submission_url).content
+        save_bytes(submission_path, submission_bytes)
 
     holdings = parse_information_table(info_bytes)
     if not holdings:
