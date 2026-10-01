@@ -7,7 +7,7 @@ from src.database.database import connect, initialize_database
 from src.sec.client import SECClient
 from src.sec.discover_13f import discover_13f, locate_information_table
 from src.sec.funds import SEC_ENTITIES
-from src.sec.parse_13f import parse_information_table
+from src.sec.parse_13f import parse_information_table, parse_legacy_information_table
 
 ROOT = Path(__file__).resolve().parents[2]
 RAW_ROOT = ROOT / "data" / "raw" / "13f"
@@ -41,9 +41,6 @@ def get_or_create_security(conn, holding):
     if cusip_row:
         security_id = cusip_row[0]
 
-        # A security's CUSIP is the stronger existing identity here. If an
-        # incoming FIGI belongs to a different existing security row, do not
-        # overwrite that row's FIGI and violate the UNIQUE(figi) constraint.
         if not cusip_row[1] and not figi_row:
             conn.execute(
                 "UPDATE securities SET figi=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -67,9 +64,6 @@ def get_or_create_security(conn, holding):
 
 
 def ingest_one(client, conn, fund_id: int, fund_slug: str, filing):
-    # If this accession is already parsed, keep the existing raw files and
-    # holdings. This makes historical ingestion safe to resume and avoids
-    # redownloading filings already present in the database.
     existing = conn.execute(
         "SELECT id, filing_status FROM filings_13f WHERE accession_number = ?",
         (filing.accession_number,),
@@ -81,20 +75,15 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing):
     folder = raw_dir(fund_slug, filing.reporting_date, filing.accession_number)
 
     index_path = folder / "filing-index.html"
-    info_path = folder / "information-table.xml"
     submission_path = folder / "submission.txt"
+    info_path = folder / "information-table.xml"
+    legacy_info_path = folder / "information-table.txt"
 
     if index_path.exists():
         index_bytes = index_path.read_bytes()
     else:
         index_bytes = client.get(filing.index_url).content
         save_bytes(index_path, index_bytes)
-
-    if info_path.exists():
-        info_bytes = info_path.read_bytes()
-    else:
-        info_bytes = client.get(filing.information_table_url).content
-        save_bytes(info_path, info_bytes)
 
     if submission_path.exists():
         submission_bytes = submission_path.read_bytes()
@@ -103,7 +92,24 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing):
         submission_bytes = client.get(submission_url).content
         save_bytes(submission_path, submission_bytes)
 
-    holdings = parse_information_table(info_bytes)
+    if filing.information_table_url:
+        if info_path.exists():
+            info_bytes = info_path.read_bytes()
+        else:
+            info_bytes = client.get(filing.information_table_url).content
+            save_bytes(info_path, info_bytes)
+        holdings = parse_information_table(info_bytes)
+    else:
+        # Pre-2013 13F-HR filings used legacy plaintext information tables.
+        # Preserve the complete submission and a copy under an explicit legacy
+        # filename so the raw source format remains clear.
+        if legacy_info_path.exists():
+            legacy_bytes = legacy_info_path.read_bytes()
+        else:
+            legacy_bytes = submission_bytes
+            save_bytes(legacy_info_path, legacy_bytes)
+        holdings = parse_legacy_information_table(legacy_bytes)
+
     if not holdings:
         raise ValueError("Filing parsed successfully but contained zero holdings")
 
@@ -169,16 +175,10 @@ def ingest_fund(client, fund_slug: str, limit: int = 1) -> list[str]:
         for entity in entities:
             cik = entity["cik"]
             filings = discover_13f(client, cik, limit=None)
-            # Prefer the latest reporting period, and if there are multiple filings
-            # for that period, keep the latest amendment/filing date.
             filings.sort(key=lambda f: (f.reporting_date, f.filing_date, f.form_type), reverse=True)
             if limit:
                 filings = filings[:limit]
             for filing in filings:
-                # Keep one malformed SEC filing from preventing the other
-                # tracked funds/filings from being processed. Each filing gets
-                # its own savepoint so a partial insert cannot leak into the
-                # database when parsing fails.
                 savepoint = "ingest_filing"
                 conn.execute(f"SAVEPOINT {savepoint}")
                 try:
