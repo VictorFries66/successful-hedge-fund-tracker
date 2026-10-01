@@ -212,7 +212,14 @@ def main():
     errors = []
     for fund_slug in funds:
         print(f"Ingesting {fund_slug}...")
-        errors.extend(ingest_fund(client, fund_slug, limit=None if args.all else 1))
+        errors.extend(
+            ingest_fund(
+                client,
+                fund_slug,
+                limit=None if args.all else 1,
+                reparse=args.reparse,
+            )
+        )
         print(f"Finished {fund_slug}.")
 
     if errors:
