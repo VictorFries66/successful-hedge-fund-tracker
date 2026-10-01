@@ -38,3 +38,5 @@ The SEC User-Agent should identify the application and a contact email.
 ## SEC data design
 
 The database stores the complete 13F Information Table fields needed for holdings analysis, while the raw filing materials are retained for provenance and parser reprocessing. Current SEC Form 13F XML specifications use dollar values rather than the older thousand-dollar convention; the database therefore stores `value_dollars` explicitly.
+
+The database retains original and amended 13F accessions, while the `latest_13f_by_period` view selects the latest filing for each fund and reporting period for quarter-to-quarter analysis.
