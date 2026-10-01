@@ -75,8 +75,6 @@ def discover_13f(client: SECClient, cik: str, limit: Optional[int] = None) -> li
     data = client.get_json(submissions_url(cik))
     records = _filing_records_from_submissions(cik, data)
 
-    # The SEC submissions endpoint keeps the most recent filings in the main
-    # JSON and exposes older history through separate JSON files.
     for historical_file in data.get("filings", {}).get("files", []):
         name = historical_file.get("name")
         if not name:
@@ -86,8 +84,6 @@ def discover_13f(client: SECClient, cik: str, limit: Optional[int] = None) -> li
         historical_data = client.get_json(historical_url)
         records.extend(_filing_records_from_submissions(cik, historical_data))
 
-    # Historical files and the recent section can overlap. Deduplicate by
-    # accession number so each filing is ingested only once.
     unique = {}
     for record in records:
         unique[record.accession_number] = record
@@ -113,18 +109,11 @@ def _resolve_document_url(filing: FilingRecord, href: str) -> str:
 
 
 def _information_table_from_submission(client: SECClient, filing: FilingRecord) -> Optional[str]:
-    """Find the information-table filename from the SEC submission text.
-
-    This is especially important for older EDGAR filings. Their filing index
-    can have a legacy layout, while the complete submission text explicitly
-    identifies the INFORMATION TABLE document and its FILENAME.
-    """
+    """Find the information-table filename from the SEC submission text."""
     submission_url = filing.index_url.replace("-index.html", ".txt")
     response = client.get(submission_url)
     text = response.text
 
-    # SEC submission text uses SGML-style DOCUMENT blocks. Look for the
-    # document whose TYPE is INFORMATION TABLE and return its filename.
     for block in re.findall(
         r"<DOCUMENT>(.*?)(?=<DOCUMENT>|</SEC-DOCUMENT>)",
         text,
@@ -155,9 +144,6 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
 
     info_url = None
 
-    # SEC filing indexes may contain multiple INFORMATION TABLE rows:
-    # one for the XSL-rendered document and one for the raw XML.
-    # Select the direct/root-level XML and ignore XSL-rendered XML.
     for row in soup.select("table.tableFile tr"):
         cells = row.find_all("td")
         if not cells:
@@ -186,8 +172,6 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
             break
 
     if not info_url:
-        # Older EDGAR filing indexes sometimes use a different table layout.
-        # Scan all document links for the raw information-table XML.
         for link in soup.find_all("a", href=True):
             href = link["href"]
             normalized = href.lower().split("?", 1)[0]
@@ -202,16 +186,19 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
             break
 
     if not info_url:
-        # The complete submission text is authoritative for legacy EDGAR
-        # filings because its DOCUMENT block names the exact information-table
-        # file, even when the filing index does not expose it in a standard
-        # table layout.
         try:
             info_url = _information_table_from_submission(client, filing)
         except Exception:
             info_url = None
 
     if not info_url:
+        # The SEC used plaintext/fixed-width 13F-HR information tables before
+        # the XML transition in May 2013. For those filings there is no
+        # information-table XML to locate; ingest_13f.py will parse the complete
+        # submission text with the legacy parser instead.
+        if filing.reporting_date < "2013-06-30":
+            return filing
+
         raise RuntimeError(
             f"Could not locate raw information table XML for "
             f"{filing.accession_number}"
