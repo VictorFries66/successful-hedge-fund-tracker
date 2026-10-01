@@ -148,3 +148,29 @@ CREATE TABLE IF NOT EXISTS ingestion_log (
     message TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Canonical 13F filing for each fund/reporting period.
+-- Amendments and original filings are retained in filings_13f, but analytics
+-- should use only the latest filing submitted for each reporting period.
+CREATE VIEW IF NOT EXISTS latest_13f_by_period AS
+SELECT
+    id,
+    fund_id,
+    accession_number,
+    filing_date,
+    reporting_date,
+    form_type,
+    sec_cik,
+    sec_url,
+    raw_file_path,
+    filing_status
+FROM (
+    SELECT
+        f.*,
+        ROW_NUMBER() OVER (
+            PARTITION BY f.fund_id, f.reporting_date
+            ORDER BY f.filing_date DESC, f.form_type DESC, f.id DESC
+        ) AS rn
+    FROM filings_13f AS f
+)
+WHERE rn = 1;
