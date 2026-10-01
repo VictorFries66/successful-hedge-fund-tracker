@@ -74,29 +74,12 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
         description = " ".join(c.get_text(" ", strip=True) for c in cells).upper()
         if "INFORMATION TABLE" not in description:
             continue
-        # A 13F INFORMATION TABLE row normally contains both infotable.html
-        # and infotable.xml. Prefer the XML document explicitly; choosing the
-        # first link can accidentally select the HTML rendering, which has no
-        # XML infoTable elements for our parser to read.
-        links = row.find_all("a", href=True)
-        link = next(
-            (a for a in links if a["href"].lower().split("?", 1)[0].endswith(".xml")),
-            None,
-        )
-        if link is None:
-            link = next(
-                (a for a in links if "infotable" in a["href"].lower()),
-                None,
-            )
-        if link:
-            href = link["href"]
-            if href.startswith("/"):
-                info_url = "https://www.sec.gov" + href
-            elif href.startswith("http"):
-                info_url = href
-            else:
-                info_url = filing.index_url.rsplit("/", 1)[0] + "/" + href
-            break
+        # The SEC filing index may expose the XSL-rendered
+        # xslForm13F_X02/infotable.xml instead of the raw XML.
+        # Construct the raw information-table URL directly.
+        accession_dir = filing.index_url.rsplit("/", 1)[0]
+        info_url = accession_dir + "/infotable.xml"
+        break
 
     if not info_url:
         # Some EDGAR index layouts expose the information table in the raw HTML
