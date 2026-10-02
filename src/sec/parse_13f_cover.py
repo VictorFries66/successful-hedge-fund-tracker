@@ -157,10 +157,17 @@ def _parse_html_cover(root) -> CoverPageRecord:
             cells = row.xpath("./td")
             if len(cells) < 2:
                 continue
-            label = _cell_text(cells[0]).lower().rstrip(":")
-            value = _cell_text(cells[1])
-            if label == "information table value total" and value:
-                table_value_total = integer(value.replace(",", "").replace("$", ""))
+            row_text = [_cell_text(cell) for cell in cells]
+            for index, cell_text in enumerate(row_text):
+                label = cell_text.lower().rstrip(":")
+                if label == "form 13f information table value total":
+                    for value in row_text[index + 1:]:
+                        parsed = integer(value.replace(",", "").replace("$", ""))
+                        if parsed is not None:
+                            table_value_total = parsed
+                            break
+                    if table_value_total is not None:
+                        break
 
     report_type = None
     report_table = _table_by_summary(root, "Report Type Information")
