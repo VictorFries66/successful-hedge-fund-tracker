@@ -42,7 +42,10 @@ def initialize_database(db_path=DB_PATH):
                     f.*,
                     ROW_NUMBER() OVER (
                         PARTITION BY f.fund_id, f.reporting_date
-                        ORDER BY f.filing_date DESC, f.form_type DESC, f.id DESC
+                        ORDER BY
+                            CASE WHEN f.form_type = '13F-HR' THEN 0 ELSE 1 END,
+                            f.filing_date DESC,
+                            f.id DESC
                     ) AS rn
                 FROM filings_13f AS f
             )
