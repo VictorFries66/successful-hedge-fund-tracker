@@ -88,7 +88,13 @@ def discover_13f(client: SECClient, cik: str, limit: Optional[int] = None) -> li
     for record in records:
         unique[record.accession_number] = record
 
-    records = list(unique.values())
+    # Scope the tracker to filings submitted under the post-transition XML
+    # system. Use filing_date rather than reporting_date because an amendment
+    # for an older reporting period can itself be an XML filing after the cutoff.
+    records = [
+        record for record in unique.values()
+        if record.filing_date >= MIN_FILING_DATE
+    ]
     records.sort(
         key=lambda f: (f.reporting_date, f.filing_date, f.form_type),
         reverse=True,
@@ -192,13 +198,6 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
             info_url = None
 
     if not info_url:
-        # The SEC used plaintext/fixed-width 13F-HR information tables before
-        # the XML transition in May 2013. For those filings there is no
-        # information-table XML to locate; ingest_13f.py will parse the complete
-        # submission text with the legacy parser instead.
-        if filing.reporting_date < "2013-06-30":
-            return filing
-
         raise RuntimeError(
             f"Could not locate raw information table XML for "
             f"{filing.accession_number}"
