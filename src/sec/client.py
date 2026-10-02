@@ -1,7 +1,8 @@
 import os
+import ssl
 import time
 import requests
-import certifi
+
 
 class SECClient:
     def __init__(self, user_agent=None, delay_seconds=0.25):
@@ -10,7 +11,17 @@ class SECClient:
             raise RuntimeError("SEC_USER_AGENT is required.")
         self.delay_seconds = delay_seconds
         self.session = requests.Session()
-        self.session.verify = certifi.where()
+
+        # Prefer an explicitly configured CA bundle, otherwise use the CA file
+        # selected by the Python/OpenSSL installation. This avoids forcing
+        # Requests to use certifi's bundled CA set, which can differ from the
+        # system/Homebrew trust store.
+        ca_bundle = os.getenv("SEC_CA_BUNDLE") or ssl.get_default_verify_paths().cafile
+        if not ca_bundle:
+            raise RuntimeError(
+                "No CA bundle is configured. Set SEC_CA_BUNDLE to a trusted CA bundle path."
+            )
+        self.session.verify = ca_bundle
         self.session.headers.update({
             "User-Agent": self.user_agent,
             "Accept-Encoding": "gzip, deflate",
