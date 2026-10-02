@@ -1,6 +1,7 @@
 import os
 import time
 import requests
+import certifi
 
 class SECClient:
     def __init__(self, user_agent=None, delay_seconds=0.25):
@@ -9,6 +10,7 @@ class SECClient:
             raise RuntimeError("SEC_USER_AGENT is required.")
         self.delay_seconds = delay_seconds
         self.session = requests.Session()
+        self.session.verify = certifi.where()
         self.session.headers.update({
             "User-Agent": self.user_agent,
             "Accept-Encoding": "gzip, deflate",
