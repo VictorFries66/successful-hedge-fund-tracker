@@ -7,7 +7,7 @@ from src.database.database import connect, initialize_database
 from src.sec.client import SECClient
 from src.sec.discover_13f import discover_13f, locate_information_table
 from src.sec.funds import SEC_ENTITIES
-from src.sec.parse_13f import parse_information_table, parse_legacy_information_table
+from src.sec.parse_13f import parse_information_table
 
 ROOT = Path(__file__).resolve().parents[2]
 RAW_ROOT = ROOT / "data" / "raw" / "13f"
@@ -77,8 +77,6 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
     index_path = folder / "filing-index.html"
     submission_path = folder / "submission.txt"
     info_path = folder / "information-table.xml"
-    legacy_info_path = folder / "information-table.txt"
-
     if index_path.exists():
         index_bytes = index_path.read_bytes()
     else:
@@ -100,16 +98,6 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
             save_bytes(info_path, info_bytes)
         value_multiplier = 1 if filing.reporting_date >= "2023-01-01" else 1000
         holdings = parse_information_table(info_bytes, value_multiplier=value_multiplier)
-    else:
-        # Pre-2013 13F-HR filings used legacy plaintext information tables.
-        # Preserve the complete submission and a copy under an explicit legacy
-        # filename so the raw source format remains clear.
-        if legacy_info_path.exists():
-            legacy_bytes = legacy_info_path.read_bytes()
-        else:
-            legacy_bytes = submission_bytes
-            save_bytes(legacy_info_path, legacy_bytes)
-        holdings = parse_legacy_information_table(legacy_bytes)
 
     if not holdings:
         raise ValueError("Filing parsed successfully but contained zero holdings")
