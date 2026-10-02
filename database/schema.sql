@@ -72,12 +72,34 @@ CREATE TABLE IF NOT EXISTS filings_13f (
     reporting_date TEXT NOT NULL,
     form_type TEXT NOT NULL,
     sec_cik TEXT,
+    sec_entity_id INTEGER,
     sec_url TEXT,
+    report_type TEXT,
+    filing_manager_name TEXT,
+    form_13f_file_number TEXT,
     raw_file_path TEXT,
     filing_status TEXT NOT NULL DEFAULT 'parsed',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (fund_id) REFERENCES funds(id) ON DELETE CASCADE
+    FOREIGN KEY (fund_id) REFERENCES funds(id) ON DELETE CASCADE,
+    FOREIGN KEY (sec_entity_id) REFERENCES fund_sec_entities(id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS filing_13f_managers (
+    id INTEGER PRIMARY KEY,
+    filing_id INTEGER NOT NULL,
+    relationship_type TEXT NOT NULL CHECK (relationship_type IN ('included', 'reporting_for')),
+    sequence_number INTEGER,
+    manager_name TEXT NOT NULL,
+    cik TEXT,
+    form_13f_file_number TEXT,
+    crd_number TEXT,
+    sec_file_number TEXT,
+    FOREIGN KEY (filing_id) REFERENCES filings_13f(id) ON DELETE CASCADE,
+    UNIQUE (filing_id, relationship_type, sequence_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_13f_filing_managers_filing ON filing_13f_managers(filing_id);
+CREATE INDEX IF NOT EXISTS idx_13f_filing_managers_cik ON filing_13f_managers(cik);
 
 CREATE INDEX IF NOT EXISTS idx_13f_fund_reporting ON filings_13f(fund_id, reporting_date DESC);
 
@@ -163,7 +185,11 @@ SELECT
     sec_cik,
     sec_url,
     raw_file_path,
-    filing_status
+    filing_status,
+    report_type,
+    filing_manager_name,
+    form_13f_file_number,
+    sec_entity_id
 FROM (
     SELECT
         f.*,
