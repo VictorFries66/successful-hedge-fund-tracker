@@ -3,3 +3,6 @@ __pycache__/
 *.py[cod]
 .DS_Store
 .env
+
+database/tracker.db
+data/raw/13f/
