@@ -233,6 +233,13 @@ def parse_cover_page(xml_bytes: bytes) -> CoverPageRecord:
     )
     root = etree.fromstring(xml_bytes, parser)
 
+    # Some SEC cover pages are XHTML documents that can be parsed as XML but
+    # store their summary information in HTML tables. Prefer the HTML parser
+    # when those tables are present so we capture the summary value total.
+    if b"Report Summary Information" in xml_bytes:
+        html_root = html.fromstring(xml_bytes)
+        return _parse_html_cover(html_root)
+
     xml_record = _parse_xml_cover(root)
     if (
         xml_record.report_type
