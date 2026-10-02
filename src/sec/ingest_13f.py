@@ -14,21 +14,33 @@ ROOT = Path(__file__).resolve().parents[2]
 RAW_ROOT = ROOT / "data" / "raw" / "13f"
 DOLLAR_VALUE_CUTOFF = "2023-01-03"
 
+# Verified filing-specific exceptions to the SEC's unit convention. These
+# filings were inspected against their submitted Information Table and
+# Summary Page and demonstrably use a different scale from the filing-date
+# default. Keep this list accession-specific rather than inferring units from
+# portfolio size or reported totals.
+VALUE_UNIT_OVERRIDES = {
+    # Lone Pine submitted whole-dollar values even though this pre-cutoff
+    # filing was still subject to the thousand-dollar convention.
+    "0000902664-15-001107": 1,
+    # Millennium continued submitting thousand-dollar values after the
+    # January 3, 2023 transition.
+    "0001273087-23-000097": 1000,
+    "0001273087-23-000113": 1000,
+}
+
 
 def value_multiplier_for_filing(
     filing_date: str,
-    raw_value_total: int | None = None,
-    table_value_total: int | None = None,
+    accession_number: str | None = None,
 ) -> int:
     """Determine whether information-table values are dollars or thousands.
 
-    Prefer the filing's own Summary Page total when available because some
-    filers did not consistently follow the post-2023 value convention.
+    The SEC's filing-date convention is the default. Verified filing-specific
+    exceptions are applied first when a filer used a different unit scale.
     """
-    if raw_value_total and table_value_total:
-        distance_dollars = abs(raw_value_total - table_value_total)
-        distance_thousands = abs(raw_value_total * 1000 - table_value_total)
-        return 1 if distance_dollars <= distance_thousands else 1000
+    if accession_number in VALUE_UNIT_OVERRIDES:
+        return VALUE_UNIT_OVERRIDES[accession_number]
 
     return 1 if filing_date >= DOLLAR_VALUE_CUTOFF else 1000
 
@@ -126,13 +138,9 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
             info_bytes = client.get(filing.information_table_url).content
             save_bytes(info_path, info_bytes)
         raw_holdings = parse_information_table(info_bytes, value_multiplier=1)
-        raw_value_total = sum(
-            holding.value_dollars or 0 for holding in raw_holdings
-        )
         value_multiplier = value_multiplier_for_filing(
             filing.filing_date,
-            raw_value_total=raw_value_total,
-            table_value_total=cover.table_value_total,
+            accession_number=filing.accession_number,
         )
         holdings = (
             raw_holdings
