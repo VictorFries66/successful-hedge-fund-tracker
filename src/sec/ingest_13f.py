@@ -8,6 +8,7 @@ from src.sec.client import SECClient
 from src.sec.discover_13f import discover_13f, locate_information_table
 from src.sec.funds import SEC_ENTITIES
 from src.sec.parse_13f import parse_information_table
+from src.sec.parse_13f_cover import parse_cover_page
 
 ROOT = Path(__file__).resolve().parents[2]
 RAW_ROOT = ROOT / "data" / "raw" / "13f"
@@ -87,6 +88,7 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
     index_path = folder / "filing-index.html"
     submission_path = folder / "submission.txt"
     info_path = folder / "information-table.xml"
+    primary_path = folder / filing.primary_document
     if index_path.exists():
         index_bytes = index_path.read_bytes()
     else:
@@ -99,6 +101,15 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
         submission_url = filing.index_url.replace("-index.html", ".txt")
         submission_bytes = client.get(submission_url).content
         save_bytes(submission_path, submission_bytes)
+
+    if primary_path.exists():
+        primary_bytes = primary_path.read_bytes()
+    else:
+        primary_url = filing.index_url.rsplit("/", 1)[0] + "/" + filing.primary_document
+        primary_bytes = client.get(primary_url).content
+        save_bytes(primary_path, primary_bytes)
+
+    cover = parse_cover_page(primary_bytes)
 
     if filing.information_table_url:
         if info_path.exists():
@@ -116,23 +127,46 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
     conn.execute(
         """
         INSERT INTO filings_13f
-          (fund_id, accession_number, filing_date, reporting_date, form_type, sec_cik, sec_url, raw_file_path, filing_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'parsed')
+          (fund_id, accession_number, filing_date, reporting_date, form_type, sec_cik,
+           sec_entity_id, sec_url, raw_file_path, filing_status, report_type,
+           filing_manager_name, form_13f_file_number)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parsed', ?, ?, ?)
         ON CONFLICT(accession_number) DO UPDATE SET
           filing_date=excluded.filing_date,
           reporting_date=excluded.reporting_date,
           form_type=excluded.form_type,
           sec_cik=excluded.sec_cik,
+          sec_entity_id=excluded.sec_entity_id,
           sec_url=excluded.sec_url,
           raw_file_path=excluded.raw_file_path,
-          filing_status='parsed'
+          filing_status='parsed',
+          report_type=excluded.report_type,
+          filing_manager_name=excluded.filing_manager_name,
+          form_13f_file_number=excluded.form_13f_file_number
         """,
         (fund_id, filing.accession_number, filing.filing_date, filing.reporting_date,
-         filing.form_type, filing.cik, sec_url, str(folder.relative_to(ROOT))),
+         filing.form_type, filing.cik,
+         conn.execute("SELECT id FROM fund_sec_entities WHERE fund_id=? AND cik=?", (fund_id, filing.cik)).fetchone()[0],
+         sec_url, str(folder.relative_to(ROOT)), cover.report_type,
+         cover.filing_manager_name, cover.form_13f_file_number),
     )
     filing_id = conn.execute(
         "SELECT id FROM filings_13f WHERE accession_number = ?", (filing.accession_number,)
     ).fetchone()[0]
+    conn.execute("DELETE FROM filing_13f_managers WHERE filing_id = ?", (filing_id,))
+    for manager in cover.other_managers:
+        conn.execute(
+            """
+            INSERT INTO filing_13f_managers
+              (filing_id, relationship_type, sequence_number, manager_name, cik,
+               form_13f_file_number, crd_number, sec_file_number)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (filing_id, manager.relationship_type, manager.sequence_number,
+             manager.manager_name, manager.cik, manager.form_13f_file_number,
+             manager.crd_number, manager.sec_file_number),
+        )
+
     conn.execute("DELETE FROM holdings_13f WHERE filing_id = ?", (filing_id,))
 
     for holding in holdings:
