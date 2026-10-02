@@ -15,7 +15,21 @@ RAW_ROOT = ROOT / "data" / "raw" / "13f"
 DOLLAR_VALUE_CUTOFF = "2023-01-03"
 
 
-def value_multiplier_for_filing(filing_date: str) -> int:
+def value_multiplier_for_filing(
+    filing_date: str,
+    raw_value_total: int | None = None,
+    table_value_total: int | None = None,
+) -> int:
+    """Determine whether information-table values are dollars or thousands.
+
+    Prefer the filing's own Summary Page total when available because some
+    filers did not consistently follow the post-2023 value convention.
+    """
+    if raw_value_total and table_value_total:
+        distance_dollars = abs(raw_value_total - table_value_total)
+        distance_thousands = abs(raw_value_total * 1000 - table_value_total)
+        return 1 if distance_dollars <= distance_thousands else 1000
+
     return 1 if filing_date >= DOLLAR_VALUE_CUTOFF else 1000
 
 
@@ -111,8 +125,20 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
         else:
             info_bytes = client.get(filing.information_table_url).content
             save_bytes(info_path, info_bytes)
-        value_multiplier = value_multiplier_for_filing(filing.filing_date)
-        holdings = parse_information_table(info_bytes, value_multiplier=value_multiplier)
+        raw_holdings = parse_information_table(info_bytes, value_multiplier=1)
+        raw_value_total = sum(
+            holding.value_dollars or 0 for holding in raw_holdings
+        )
+        value_multiplier = value_multiplier_for_filing(
+            filing.filing_date,
+            raw_value_total=raw_value_total,
+            table_value_total=cover.table_value_total,
+        )
+        holdings = (
+            raw_holdings
+            if value_multiplier == 1
+            else parse_information_table(info_bytes, value_multiplier=value_multiplier)
+        )
 
     if not holdings:
         raise ValueError("Filing parsed successfully but contained zero holdings")
