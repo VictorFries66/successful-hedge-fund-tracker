@@ -12,11 +12,6 @@ from src.sec.parse_13f_cover import parse_cover_page
 
 ROOT = Path(__file__).resolve().parents[2]
 RAW_ROOT = ROOT / "data" / "raw" / "13f"
-
-# EDGAR Release 22.4.1 changed the 13F XML <value> field from thousands
-# of dollars to the nearest dollar, effective January 3, 2023. Use the
-# filing date because amendments to older reporting periods can be filed
-# under the newer dollar convention.
 DOLLAR_VALUE_CUTOFF = "2023-01-03"
 
 
@@ -36,28 +31,22 @@ def save_bytes(path: Path, data: bytes):
 def get_or_create_security(conn, holding):
     cusip_row = None
     figi_row = None
-
     if holding.cusip:
         cusip_row = conn.execute(
-            "SELECT id, figi FROM securities WHERE cusip = ?",
-            (holding.cusip,),
+            "SELECT id, figi FROM securities WHERE cusip = ?", (holding.cusip,)
         ).fetchone()
-
     if holding.figi:
         figi_row = conn.execute(
-            "SELECT id FROM securities WHERE figi = ?",
-            (holding.figi,),
+            "SELECT id FROM securities WHERE figi = ?", (holding.figi,)
         ).fetchone()
 
     if cusip_row:
         security_id = cusip_row[0]
-
         if not cusip_row[1] and not figi_row:
             conn.execute(
                 "UPDATE securities SET figi=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (holding.figi, security_id),
             )
-
         conn.execute(
             "UPDATE securities SET company_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (holding.issuer_name, security_id),
@@ -89,6 +78,7 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
     submission_path = folder / "submission.txt"
     info_path = folder / "information-table.xml"
     primary_path = folder / filing.primary_document
+
     if index_path.exists():
         index_bytes = index_path.read_bytes()
     else:
@@ -104,6 +94,9 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
 
     if primary_path.exists():
         primary_bytes = primary_path.read_bytes()
+    elif filing.primary_document_url:
+        primary_bytes = client.get(filing.primary_document_url).content
+        save_bytes(primary_path, primary_bytes)
     else:
         primary_url = filing.index_url.rsplit("/", 1)[0] + "/" + filing.primary_document
         primary_bytes = client.get(primary_url).content
@@ -111,6 +104,7 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
 
     cover = parse_cover_page(primary_bytes)
 
+    holdings = []
     if filing.information_table_url:
         if info_path.exists():
             info_bytes = info_path.read_bytes()
@@ -124,6 +118,13 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
         raise ValueError("Filing parsed successfully but contained zero holdings")
 
     sec_url = filing.index_url
+    sec_entity = conn.execute(
+        "SELECT id FROM fund_sec_entities WHERE fund_id=? AND cik=?",
+        (fund_id, filing.cik),
+    ).fetchone()
+    if not sec_entity:
+        raise RuntimeError(f"No SEC entity configured for {fund_slug} CIK {filing.cik}")
+
     conn.execute(
         """
         INSERT INTO filings_13f
@@ -144,15 +145,19 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
           filing_manager_name=excluded.filing_manager_name,
           form_13f_file_number=excluded.form_13f_file_number
         """,
-        (fund_id, filing.accession_number, filing.filing_date, filing.reporting_date,
-         filing.form_type, filing.cik,
-         conn.execute("SELECT id FROM fund_sec_entities WHERE fund_id=? AND cik=?", (fund_id, filing.cik)).fetchone()[0],
-         sec_url, str(folder.relative_to(ROOT)), cover.report_type,
-         cover.filing_manager_name, cover.form_13f_file_number),
+        (
+            fund_id, filing.accession_number, filing.filing_date, filing.reporting_date,
+            filing.form_type, filing.cik, sec_entity[0], sec_url,
+            str(folder.relative_to(ROOT)), cover.report_type,
+            cover.filing_manager_name, cover.form_13f_file_number,
+        ),
     )
+
     filing_id = conn.execute(
-        "SELECT id FROM filings_13f WHERE accession_number = ?", (filing.accession_number,)
+        "SELECT id FROM filings_13f WHERE accession_number = ?",
+        (filing.accession_number,),
     ).fetchone()[0]
+
     conn.execute("DELETE FROM filing_13f_managers WHERE filing_id = ?", (filing_id,))
     for manager in cover.other_managers:
         conn.execute(
@@ -162,13 +167,14 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
                form_13f_file_number, crd_number, sec_file_number)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (filing_id, manager.relationship_type, manager.sequence_number,
-             manager.manager_name, manager.cik, manager.form_13f_file_number,
-             manager.crd_number, manager.sec_file_number),
+            (
+                filing_id, manager.relationship_type, manager.sequence_number,
+                manager.manager_name, manager.cik, manager.form_13f_file_number,
+                manager.crd_number, manager.sec_file_number,
+            ),
         )
 
     conn.execute("DELETE FROM holdings_13f WHERE filing_id = ?", (filing_id,))
-
     for holding in holdings:
         security_id = get_or_create_security(conn, holding)
         conn.execute(
@@ -180,12 +186,14 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
                none_voting, raw_xml_hash)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (filing_id, security_id, holding.issuer_name, holding.title_of_class,
-             holding.cusip, holding.figi, holding.value_dollars,
-             holding.shares_or_principal, holding.shares_or_principal_type,
-             holding.put_call, holding.investment_discretion, holding.other_manager,
-             holding.sole_voting, holding.shared_voting, holding.none_voting,
-             holding.raw_xml_hash),
+            (
+                filing_id, security_id, holding.issuer_name, holding.title_of_class,
+                holding.cusip, holding.figi, holding.value_dollars,
+                holding.shares_or_principal, holding.shares_or_principal_type,
+                holding.put_call, holding.investment_discretion, holding.other_manager,
+                holding.sole_voting, holding.shared_voting, holding.none_voting,
+                holding.raw_xml_hash,
+            ),
         )
 
     conn.execute(
@@ -195,9 +203,12 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
     return len(holdings)
 
 
-def ingest_fund(client, fund_slug: str, limit: int = 1, reparse: bool = False) -> list[str]:
+def ingest_fund(client: SECClient, fund_slug: str, limit: int = 1, reparse: bool = False) -> list[str]:
     initialize_database()
-    entities = [e for e in SEC_ENTITIES[fund_slug] if e.get("include_in_13f", e.get("role") == "primary")]
+    entities = [
+        e for e in SEC_ENTITIES[fund_slug]
+        if e.get("include_in_13f", e.get("role") == "primary")
+    ]
     errors = []
     with connect() as conn:
         fund = conn.execute("SELECT id FROM funds WHERE slug = ?", (fund_slug,)).fetchone()
@@ -206,11 +217,14 @@ def ingest_fund(client, fund_slug: str, limit: int = 1, reparse: bool = False) -
         fund_id = fund[0]
 
         for entity in entities:
-            cik = entity["cik"]
-            filings = discover_13f(client, cik, limit=None)
-            filings.sort(key=lambda f: (f.reporting_date, f.filing_date, f.form_type), reverse=True)
+            filings = discover_13f(client, entity["cik"], limit=None)
+            filings.sort(
+                key=lambda f: (f.reporting_date, f.filing_date, f.form_type),
+                reverse=True,
+            )
             if limit:
                 filings = filings[:limit]
+
             for filing in filings:
                 savepoint = "ingest_filing"
                 conn.execute(f"SAVEPOINT {savepoint}")
@@ -235,13 +249,22 @@ def ingest_fund(client, fund_slug: str, limit: int = 1, reparse: bool = False) -
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--fund", choices=sorted(SEC_ENTITIES), action="append")
-    parser.add_argument("--all", action="store_true", help="Process all discovered 13F-HR/HRA filings instead of latest only.")
-    parser.add_argument("--reparse", action="store_true", help="Re-download/parse filings already marked parsed. Use with --all to rebuild historical data with the current parser.")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process all discovered 13F-HR/HRA filings instead of latest only.",
+    )
+    parser.add_argument(
+        "--reparse",
+        action="store_true",
+        help="Re-download/parse filings already marked parsed. Use with --all to rebuild historical data with the current parser.",
+    )
     args = parser.parse_args()
 
     client = SECClient()
     funds = args.fund or sorted(SEC_ENTITIES)
     errors = []
+
     for fund_slug in funds:
         print(f"Ingesting {fund_slug}...")
         errors.extend(
