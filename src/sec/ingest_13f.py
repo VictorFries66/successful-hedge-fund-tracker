@@ -12,6 +12,16 @@ from src.sec.parse_13f import parse_information_table
 ROOT = Path(__file__).resolve().parents[2]
 RAW_ROOT = ROOT / "data" / "raw" / "13f"
 
+# EDGAR Release 22.4.1 changed the 13F XML <value> field from thousands
+# of dollars to the nearest dollar, effective January 3, 2023. Use the
+# filing date because amendments to older reporting periods can be filed
+# under the newer dollar convention.
+DOLLAR_VALUE_CUTOFF = "2023-01-03"
+
+
+def value_multiplier_for_filing(filing_date: str) -> int:
+    return 1 if filing_date >= DOLLAR_VALUE_CUTOFF else 1000
+
 
 def raw_dir(fund_slug: str, reporting_date: str, accession: str) -> Path:
     return RAW_ROOT / fund_slug / reporting_date / accession
@@ -96,7 +106,7 @@ def ingest_one(client, conn, fund_id: int, fund_slug: str, filing, reparse: bool
         else:
             info_bytes = client.get(filing.information_table_url).content
             save_bytes(info_path, info_bytes)
-        value_multiplier = 1 if filing.reporting_date >= "2023-01-01" else 1000
+        value_multiplier = value_multiplier_for_filing(filing.filing_date)
         holdings = parse_information_table(info_bytes, value_multiplier=value_multiplier)
 
     if not holdings:
