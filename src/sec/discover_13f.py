@@ -9,6 +9,12 @@ from bs4 import BeautifulSoup
 from src.sec.client import SECClient
 
 
+# The SEC replaced the text-based 13F format with XML on May 20, 2013.
+# The tracker intentionally starts at that filing-date boundary, regardless of
+# the reporting period covered by a filing.
+MIN_FILING_DATE = "2013-05-20"
+
+
 @dataclass(frozen=True)
 class FilingRecord:
     cik: str
