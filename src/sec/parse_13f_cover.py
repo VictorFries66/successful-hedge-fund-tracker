@@ -87,7 +87,7 @@ def parse_cover_page(xml_bytes: bytes) -> CoverPageRecord:
 
     for element in root.iter():
         tag = local_name(element.tag).lower()
-        if not tag.startswith("othermanager"):
+        if not (tag.startswith("othermanager") or tag.startswith("otherincludedmanager")):
             continue
 
         relationship_type = None
