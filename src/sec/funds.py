@@ -20,7 +20,7 @@ SEC_ENTITIES = {
     ],
     "pershing-square": [
         {"cik": "0002026053", "legal_name": "Pershing Square Inc.", "role": "primary", "include_in_13f": True},
-        {"cik": "0001336528", "legal_name": "Pershing Square Capital Management, L.P.", "role": "related", "include_in_13f": False},
+        {"cik": "0001336528", "legal_name": "Pershing Square Capital Management, L.P.", "role": "related", "include_in_13f": True},
     ],
     "elliott": [
         {"cik": "0001791786", "legal_name": "Elliott Investment Management L.P.", "role": "primary", "include_in_13f": True},
