@@ -22,6 +22,7 @@ class CoverPageRecord:
     report_type: Optional[str]
     filing_manager_name: Optional[str]
     form_13f_file_number: Optional[str]
+    table_value_total: Optional[int]
     other_managers: list[OtherManagerRecord]
 
 
@@ -68,6 +69,7 @@ def _manager_record(element, relationship_type: str) -> Optional[OtherManagerRec
 
 def _parse_xml_cover(root) -> CoverPageRecord:
     report_type = child_text(root, "reportType")
+    table_value_total = integer(child_text(root, "tableValueTotal"))
     filing_manager_name = None
     form_13f_file_number = None
 
@@ -113,6 +115,7 @@ def _parse_xml_cover(root) -> CoverPageRecord:
         report_type=report_type,
         filing_manager_name=filing_manager_name,
         form_13f_file_number=form_13f_file_number,
+        table_value_total=table_value_total,
         other_managers=managers,
     )
 
@@ -146,6 +149,18 @@ def _parse_html_cover(root) -> CoverPageRecord:
                 filing_manager_name = value
             elif label == "form 13f file number" and value:
                 form_13f_file_number = value
+
+    table_value_total = None
+    summary_table = _table_by_summary(root, "Report Summary Information")
+    if summary_table is not None:
+        for row in summary_table.xpath(".//tr"):
+            cells = row.xpath("./td")
+            if len(cells) < 2:
+                continue
+            label = _cell_text(cells[0]).lower().rstrip(":")
+            value = _cell_text(cells[1])
+            if label == "information table value total" and value:
+                table_value_total = integer(value.replace(",", "").replace("$", ""))
 
     report_type = None
     report_table = _table_by_summary(root, "Report Type Information")
@@ -204,6 +219,7 @@ def _parse_html_cover(root) -> CoverPageRecord:
         report_type=report_type,
         filing_manager_name=filing_manager_name,
         form_13f_file_number=form_13f_file_number,
+        table_value_total=table_value_total,
         other_managers=managers,
     )
 
@@ -222,6 +238,7 @@ def parse_cover_page(xml_bytes: bytes) -> CoverPageRecord:
         xml_record.report_type
         or xml_record.filing_manager_name
         or xml_record.form_13f_file_number
+        or xml_record.table_value_total is not None
         or xml_record.other_managers
     ):
         return xml_record
