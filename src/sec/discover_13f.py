@@ -9,9 +9,6 @@ from bs4 import BeautifulSoup
 from src.sec.client import SECClient
 
 
-# The SEC replaced the text-based 13F format with XML on May 20, 2013.
-# The tracker intentionally starts at that filing-date boundary, regardless of
-# the reporting period covered by a filing.
 MIN_FILING_DATE = "2013-05-20"
 
 
@@ -26,6 +23,7 @@ class FilingRecord:
     sec_url: str
     index_url: str
     information_table_url: Optional[str] = None
+    primary_document_url: Optional[str] = None
 
 
 def submissions_url(cik: str) -> str:
@@ -71,13 +69,6 @@ def _filing_records_from_submissions(cik: str, data: dict) -> list[FilingRecord]
 
 
 def discover_13f(client: SECClient, cik: str, limit: Optional[int] = None) -> list[FilingRecord]:
-    """Discover 13F-HR/HRA filings across the complete SEC submission history.
-
-    The main submissions JSON contains a recent filing history and, when older
-    filings exist, references additional historical JSON files in
-    "filings.files". We load both sources so limit=None really means all
-    available 13F filings for the CIK.
-    """
     data = client.get_json(submissions_url(cik))
     records = _filing_records_from_submissions(cik, data)
 
@@ -85,18 +76,12 @@ def discover_13f(client: SECClient, cik: str, limit: Optional[int] = None) -> li
         name = historical_file.get("name")
         if not name:
             continue
-
         historical_url = f"https://data.sec.gov/submissions/{name}"
-        historical_data = client.get_json(historical_url)
-        records.extend(_filing_records_from_submissions(cik, historical_data))
+        records.extend(
+            _filing_records_from_submissions(cik, client.get_json(historical_url))
+        )
 
-    unique = {}
-    for record in records:
-        unique[record.accession_number] = record
-
-    # Scope the tracker to filings submitted under the post-transition XML
-    # system. Use filing_date rather than reporting_date because an amendment
-    # for an older reporting period can itself be an XML filing after the cutoff.
+    unique = {record.accession_number: record for record in records}
     records = [
         record for record in unique.values()
         if record.filing_date >= MIN_FILING_DATE
@@ -120,23 +105,34 @@ def _resolve_document_url(filing: FilingRecord, href: str) -> str:
     return filing.index_url.rsplit("/", 1)[0] + "/" + href
 
 
+def _filing_document_url(
+    client: SECClient,
+    filing: FilingRecord,
+    filename: str,
+) -> Optional[str]:
+    soup = BeautifulSoup(client.get(filing.index_url).text, "html.parser")
+    target = filename.lower().split("?", 1)[0]
+
+    for link in soup.find_all("a", href=True):
+        href = link["href"]
+        normalized = href.lower().split("?", 1)[0]
+        if normalized == target or normalized.endswith("/" + target):
+            return _resolve_document_url(filing, href)
+
+    return None
+
+
 def _information_table_from_submission(client: SECClient, filing: FilingRecord) -> Optional[str]:
-    """Find the information-table filename from the SEC submission text."""
     submission_url = filing.index_url.replace("-index.html", ".txt")
-    response = client.get(submission_url)
-    text = response.text
+    text = client.get(submission_url).text
 
     for block in re.findall(
         r"<DOCUMENT>(.*?)(?=<DOCUMENT>|</SEC-DOCUMENT>)",
         text,
         flags=re.IGNORECASE | re.DOTALL,
     ):
-        doc_type = re.search(
-            r"<TYPE>\s*([^\r\n<]+)", block, flags=re.IGNORECASE
-        )
-        filename = re.search(
-            r"<FILENAME>\s*([^\r\n<]+)", block, flags=re.IGNORECASE
-        )
+        doc_type = re.search(r"<TYPE>\s*([^\r\n<]+)", block, flags=re.IGNORECASE)
+        filename = re.search(r"<FILENAME>\s*([^\r\n<]+)", block, flags=re.IGNORECASE)
         if not doc_type or not filename:
             continue
         if doc_type.group(1).strip().upper() != "INFORMATION TABLE":
@@ -155,30 +151,21 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
     soup = BeautifulSoup(html, "html.parser")
 
     info_url = None
-
     for row in soup.select("table.tableFile tr"):
         cells = row.find_all("td")
         if not cells:
             continue
 
-        description = " ".join(
-            c.get_text(" ", strip=True) for c in cells
-        ).upper()
-
+        description = " ".join(c.get_text(" ", strip=True) for c in cells).upper()
         if "INFORMATION TABLE" not in description:
             continue
 
         for link in row.find_all("a", href=True):
             href = link["href"]
             normalized = href.lower().split("?", 1)[0]
-
-            if not normalized.endswith(".xml"):
-                continue
-            if "xslform13f_" in normalized:
-                continue
-
-            info_url = _resolve_document_url(filing, href)
-            break
+            if normalized.endswith(".xml") and "xslform13f_" not in normalized:
+                info_url = _resolve_document_url(filing, href)
+                break
 
         if info_url:
             break
@@ -193,7 +180,6 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
                 continue
             if normalized.endswith("/primary_doc.xml") or normalized.endswith("primary_doc.xml"):
                 continue
-
             info_url = _resolve_document_url(filing, href)
             break
 
@@ -205,10 +191,13 @@ def locate_information_table(client: SECClient, filing: FilingRecord) -> FilingR
 
     if not info_url:
         raise RuntimeError(
-            f"Could not locate raw information table XML for "
-            f"{filing.accession_number}"
+            f"Could not locate raw information table XML for {filing.accession_number}"
         )
 
+    primary_url = _filing_document_url(client, filing, filing.primary_document)
+
     return FilingRecord(
-        **{**filing.__dict__, "information_table_url": info_url}
+        **{**filing.__dict__,
+           "information_table_url": info_url,
+           "primary_document_url": primary_url}
     )
