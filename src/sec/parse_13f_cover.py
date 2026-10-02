@@ -175,22 +175,7 @@ def _parse_html_cover(root) -> CoverPageRecord:
             cells = row.xpath("./td")
             values = [_cell_text(cell) for cell in cells]
 
-            # Older 13F HTML covers use four columns:
-            # No., Form 13F File Number, Name.
-            # Newer covers may include additional CRD/SEC file/CIK columns.
-            if len(values) >= 4 and values[1].isdigit() and values[2]:
-                managers.append(
-                    OtherManagerRecord(
-                        relationship_type="included",
-                        sequence_number=integer(values[1]),
-                        manager_name=values[3],
-                        form_13f_file_number=values[2] or None,
-                        crd_number=None,
-                        sec_file_number=None,
-                        cik=None,
-                    )
-                )
-            elif len(values) >= 7 and values[1].isdigit() and values[2]:
+            if len(values) >= 7 and values[1].isdigit() and values[2]:
                 managers.append(
                     OtherManagerRecord(
                         relationship_type="included",
@@ -200,6 +185,18 @@ def _parse_html_cover(root) -> CoverPageRecord:
                         crd_number=values[4] or None,
                         sec_file_number=values[5] or None,
                         cik=values[6] or None,
+                    )
+                )
+            elif len(values) >= 4 and values[1].isdigit() and values[2]:
+                managers.append(
+                    OtherManagerRecord(
+                        relationship_type="included",
+                        sequence_number=integer(values[1]),
+                        manager_name=values[3],
+                        form_13f_file_number=values[2] or None,
+                        crd_number=None,
+                        sec_file_number=None,
+                        cik=None,
                     )
                 )
 
