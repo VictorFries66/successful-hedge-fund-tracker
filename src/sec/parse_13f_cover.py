@@ -90,10 +90,16 @@ def parse_cover_page(xml_bytes: bytes) -> CoverPageRecord:
         if not (tag.startswith("othermanager") or tag.startswith("otherincludedmanager")):
             continue
 
+        ancestor_tags = [
+            local_name(parent.tag).lower()
+            for parent in element.iterancestors()
+        ]
+        context = " ".join([tag, *ancestor_tags])
+
         relationship_type = None
-        if "included" in tag:
+        if "otherincludedmanager" in context:
             relationship_type = "included"
-        elif "reporting" in tag:
+        elif "othermanager" in context:
             relationship_type = "reporting_for"
 
         if relationship_type:
