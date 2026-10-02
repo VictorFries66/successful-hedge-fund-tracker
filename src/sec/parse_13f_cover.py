@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from lxml import etree
+from lxml import etree, html
 
 
 @dataclass
@@ -66,12 +66,7 @@ def _manager_record(element, relationship_type: str) -> Optional[OtherManagerRec
     )
 
 
-def parse_cover_page(xml_bytes: bytes) -> CoverPageRecord:
-    root = etree.fromstring(
-        xml_bytes,
-        etree.XMLParser(resolve_entities=False, recover=True, no_network=True, huge_tree=True),
-    )
-
+def _parse_xml_cover(root) -> CoverPageRecord:
     report_type = child_text(root, "reportType")
     filing_manager_name = None
     form_13f_file_number = None
@@ -120,3 +115,105 @@ def parse_cover_page(xml_bytes: bytes) -> CoverPageRecord:
         form_13f_file_number=form_13f_file_number,
         other_managers=managers,
     )
+
+
+def _table_by_summary(root, summary: str):
+    target = summary.lower()
+    for table in root.xpath("//table"):
+        value = (table.get("summary") or "").strip().lower()
+        if value == target:
+            return table
+    return None
+
+
+def _cell_text(cell) -> str:
+    return " ".join(" ".join(cell.itertext()).split())
+
+
+def _parse_html_cover(root) -> CoverPageRecord:
+    manager_table = _table_by_summary(root, "Filing Manager Information")
+    filing_manager_name = None
+    form_13f_file_number = None
+
+    if manager_table is not None:
+        for row in manager_table.xpath(".//tr"):
+            cells = row.xpath("./td")
+            if len(cells) < 2:
+                continue
+            label = _cell_text(cells[0]).lower().rstrip(":")
+            value = _cell_text(cells[1])
+            if label == "name" and value:
+                filing_manager_name = value
+            elif label == "form 13f file number" and value:
+                form_13f_file_number = value
+
+    report_type = None
+    report_table = _table_by_summary(root, "Report Type Information")
+    if report_table is not None:
+        for row in report_table.xpath(".//tr"):
+            cells = row.xpath("./td")
+            if len(cells) < 2:
+                continue
+            marker = _cell_text(cells[0]).strip().upper()
+            description = _cell_text(cells[1])
+            if marker == "X":
+                for candidate in (
+                    "13F HOLDINGS REPORT",
+                    "13F NOTICE",
+                    "13F COMBINATION REPORT",
+                ):
+                    if candidate in description.upper():
+                        report_type = candidate
+                        break
+            if report_type:
+                break
+
+    managers = []
+    manager_table = _table_by_summary(root, "Report Summary Other Included Managers")
+    if manager_table is not None:
+        for row in manager_table.xpath(".//tr"):
+            cells = row.xpath("./td")
+            values = [_cell_text(cell) for cell in cells]
+            if len(values) < 7 or not values[1].isdigit() or not values[2]:
+                continue
+
+            managers.append(
+                OtherManagerRecord(
+                    relationship_type="included",
+                    sequence_number=integer(values[1]),
+                    manager_name=values[2],
+                    form_13f_file_number=values[3] or None,
+                    crd_number=values[4] or None,
+                    sec_file_number=values[5] or None,
+                    cik=values[6] or None,
+                )
+            )
+
+    return CoverPageRecord(
+        report_type=report_type,
+        filing_manager_name=filing_manager_name,
+        form_13f_file_number=form_13f_file_number,
+        other_managers=managers,
+    )
+
+
+def parse_cover_page(xml_bytes: bytes) -> CoverPageRecord:
+    parser = etree.XMLParser(
+        resolve_entities=False,
+        recover=True,
+        no_network=True,
+        huge_tree=True,
+    )
+    root = etree.fromstring(xml_bytes, parser)
+
+    xml_record = _parse_xml_cover(root)
+    if (
+        xml_record.report_type
+        or xml_record.filing_manager_name
+        or xml_record.form_13f_file_number
+        or xml_record.other_managers
+    ):
+        return xml_record
+
+    html_root = html.fromstring(xml_bytes)
+    return _parse_html_cover(html_root)
