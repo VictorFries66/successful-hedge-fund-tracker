@@ -47,7 +47,7 @@ def layout(title, body, active="", nested=False):
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{esc(title)} · Successful Hedge Fund Investment Tracker</title><link rel="stylesheet" href="{css}"></head>
-<body><header class="site-header"><div class="header-inner"><a class="brand" href="index.html">Hedge Fund Investment Tracker</a><nav>{links}</nav></div></header>{body}</body></html>"""
+<body><header class="site-header"><div class="header-inner"><a class="brand" href="{prefix}index.html">Hedge Fund Investment Tracker</a><nav>{links}</nav></div></header>{body}</body></html>"""
 
 def render_overview(conn):
     rows=fund_overview(conn)
