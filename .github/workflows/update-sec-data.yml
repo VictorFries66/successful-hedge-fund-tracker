@@ -17,16 +17,24 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Ingest latest 13F filings
+      - name: Initialize SEC database
+        run: python -m src.database.seed
+      - name: Ingest 13F filings
         env:
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
-        run: python -m src.sec.ingest_13f
+        run: |
+          if [ "$(sqlite3 database/tracker.db 'SELECT COUNT(*) FROM filings_13f;')" -eq 0 ]; then
+            python -m src.sec.ingest_13f --all
+          else
+            python -m src.sec.ingest_13f
+          fi
       - name: Validate Python
         run: python -m compileall -q src
       - name: Commit database and raw SEC data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add database/ data/raw/13f/
+          git add -f database/tracker.db
+          git add data/raw/13f/
           git diff --cached --quiet || git commit -m "Update SEC 13F data"
           git push
