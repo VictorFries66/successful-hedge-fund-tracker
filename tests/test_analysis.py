@@ -142,7 +142,8 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(detail.reporting_date, "2026-06-30")
         self.assertEqual(detail.form_type, "13F-HR")
         self.assertEqual([p.issuer_name for p in detail.top_positions], ["Common Co", "New Co"])
-        self.assertEqual(detail.position_changes[0].classification, "increased")
+        changes = {c.issuer_name: c for c in detail.position_changes}
+        self.assertEqual(changes["Common Co"].classification, "increased")
 
     def test_overlap_finds_common_holdings(self):
         overlap = portfolio_overlap(self.conn, "2026-06-30")
