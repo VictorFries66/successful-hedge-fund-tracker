@@ -198,6 +198,26 @@ def position_changes(conn, fund_slug, reporting_date=None):
             ))
             continue
 
+        if old is None:
+            results.append(PositionChange(
+                fund_id=new.fund_id,
+                fund_name=new.fund_name,
+                reporting_date=current_date,
+                previous_reporting_date=previous_date,
+                issuer_name=new.issuer_name,
+                cusip=new.cusip,
+                previous_value_dollars=None,
+                value_dollars=new.value_dollars,
+                value_change_dollars=None,
+                value_change_percent=None,
+                previous_shares=None,
+                shares=new.shares_or_principal,
+                shares_change=None,
+                shares_change_percent=None,
+                classification="new",
+            ))
+            continue
+
         old_shares = old.shares_or_principal
         new_shares = new.shares_or_principal
         if old_shares in (None, 0) and new_shares not in (None, 0):
