@@ -41,10 +41,12 @@ def signed_money(value):
 
 def layout(title, body, active="", nested=False):
     nav = [("index.html","Hedge Funds","funds"),("13f-analysis.html","13F Analysis","13f"),("13d-analysis.html","13D Analysis","13d")]
-    prefix = "../" if nested else ""\n    links = "".join(f'<a class="nav-link {"active" if active == key else ""}" href="{prefix}{href}">{label}</a>' for href,label,key in nav)
+    prefix = "../" if nested else ""
+    css = "../css/style.css" if nested else "css/style.css"
+    links = "".join(f'<a class="nav-link {"active" if active == key else ""}" href="{prefix}{href}">{label}</a>' for href,label,key in nav)
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{esc(title)} · Successful Hedge Fund Investment Tracker</title><link rel="stylesheet" href="css/style.css"></head>
+<title>{esc(title)} · Successful Hedge Fund Investment Tracker</title><link rel="stylesheet" href="{css}"></head>
 <body><header class="site-header"><div class="header-inner"><a class="brand" href="index.html">Hedge Fund Investment Tracker</a><nav>{links}</nav></div></header>{body}</body></html>"""
 
 def render_overview(conn):
