@@ -40,17 +40,6 @@ class PositionChange:
     classification: str
 
 
-def _position_key_sql():
-    # CUSIP is the preferred security identity. Fall back to FIGI and then
-    # issuer/title for older rows where a security identifier is unavailable.
-    return """
-        COALESCE(
-            NULLIF(h.cusip, ''),
-            NULLIF(h.figi, ''),
-            UPPER(TRIM(h.issuer_name)) || '|' || COALESCE(UPPER(TRIM(h.title_of_class)), '')
-        )
-    """
-
 
 def latest_positions(conn, fund_slug=None, reporting_date=None):
     """Return canonical latest-period positions, optionally filtered."""
@@ -76,18 +65,7 @@ def latest_positions(conn, fund_slug=None, reporting_date=None):
 
     rows = conn.execute(
         f"""
-        WITH latest AS (
-            SELECT
-                v.id AS filing_id,
-                v.fund_id,
-                v.reporting_date,
-                ROW_NUMBER() OVER (
-                    PARTITION BY v.fund_id, v.reporting_date
-                    ORDER BY v.filing_date DESC, v.id DESC
-                ) AS rn
-            FROM latest_13f_by_period v
-        ),
-        position_totals AS (
+        WITH position_totals AS (
             SELECT
                 h.filing_id,
                 SUM(COALESCE(h.value_dollars, 0)) AS total_value
