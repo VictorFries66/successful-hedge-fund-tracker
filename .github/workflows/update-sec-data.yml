@@ -37,7 +37,14 @@ jobs:
             mv database/tracker.db.pending database/tracker.db
             echo "Restored pending SEC database from GitHub Release."
           else
-            echo "No persistent SEC database found; this run will perform a full historical ingestion."
+            recovery_asset="$(gh release view sec-database --json assets --jq '.assets[] | select(.name | startswith("tracker.db.")) | [.createdAt, .name] | @tsv' | sort | tail -n 1 | cut -f2)"
+            if [ -n "$recovery_asset" ]; then
+              gh release download sec-database --pattern "$recovery_asset" --dir database --clobber
+              mv "database/$recovery_asset" database/tracker.db
+              echo "Restored latest temporary SEC database from GitHub Release."
+            else
+              echo "No persistent SEC database found; this run will perform a full historical ingestion."
+            fi
           fi
 
       - name: Initialize SEC database
@@ -70,15 +77,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Keep a pending copy before replacing tracker.db. If the final
-          # upload fails, the pending copy can be restored on the next run.
-          gh release upload sec-database database/tracker.db --clobber --repo "$GITHUB_REPOSITORY" --pattern "tracker.db.pending"
+          # Upload a pending copy first. If the final replacement fails,
+          # the pending copy remains available for the next run.
+          cp database/tracker.db tracker.db.pending
+          gh release upload sec-database tracker.db.pending --clobber
 
           if gh release view sec-database --json assets --jq '.assets[] | select(.name == "tracker.db") | .name' | grep -qx "tracker.db"; then
             gh release delete-asset sec-database tracker.db --yes
           fi
 
           gh release upload sec-database database/tracker.db
-          gh release delete-asset sec-database tracker.db.pending --yes
 
+          assets="$(gh release view sec-database --json assets --jq '.assets[].name')"
+          while IFS= read -r asset; do
+            case "$asset" in
+              tracker.db.pending|tracker.db.*)
+                gh release delete-asset sec-database "$asset" --yes
+                ;;
+            esac
+          done <<< "$assets"
+
+          rm -f tracker.db.pending
           echo "Persistent SEC database updated successfully."
