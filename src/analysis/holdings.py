@@ -63,8 +63,16 @@ def latest_positions(conn, fund_slug=None, reporting_date=None):
     if reporting_date is not None:
         clauses.append("v.reporting_date = ?")
         params.append(reporting_date)
+    else:
+        clauses.append("""
+            v.reporting_date = (
+                SELECT MAX(v2.reporting_date)
+                FROM latest_13f_by_period v2
+                WHERE v2.fund_id = v.fund_id
+            )
+        """)
 
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    where = "WHERE " + " AND ".join(clauses)
 
     rows = conn.execute(
         f"""
