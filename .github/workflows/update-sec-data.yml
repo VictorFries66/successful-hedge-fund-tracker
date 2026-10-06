@@ -49,6 +49,16 @@ jobs:
             python -m src.sec.ingest_13f
           fi
 
+      - name: Validate database
+        run: |
+          test -s database/tracker.db
+          test "$(sqlite3 database/tracker.db 'PRAGMA integrity_check;')" = "ok"
+          filings="$(sqlite3 database/tracker.db 'SELECT COUNT(*) FROM filings_13f;')"
+          holdings="$(sqlite3 database/tracker.db 'SELECT COUNT(*) FROM holdings_13f;')"
+          test "$filings" -gt 0
+          test "$holdings" -gt 0
+          echo "Database integrity check passed: $filings filings, $holdings holdings."
+
       - name: Validate Python
         run: python -m compileall -q src
 
@@ -56,14 +66,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          test -s database/tracker.db
-
           if gh release view sec-database --json assets --jq '.assets[] | select(.name == "tracker.db") | .name' | grep -qx "tracker.db"; then
             temp_asset="tracker.db.${GITHUB_RUN_ID}"
             cp database/tracker.db "$temp_asset"
 
-            # Upload the new database under a temporary name first so the
-            # previous known-good database remains available if upload fails.
+            # Upload under a temporary name first so a failed upload cannot
+            # destroy the previous known-good database.
             gh release upload sec-database "$temp_asset"
 
             old_id="$(gh release view sec-database --json assets --jq '.assets[] | select(.name == "tracker.db") | .id')"
