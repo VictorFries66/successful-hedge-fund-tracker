@@ -74,10 +74,11 @@ jobs:
             # destroy the previous known-good database.
             gh release upload sec-database "$temp_asset"
 
-            old_id="$(gh release view sec-database --json assets --jq '.assets[] | select(.name == "tracker.db") | .id')"
+            # Replace the old asset using the GitHub CLI's release-asset
+            # command, then rename the new asset through the REST API.
+            gh release delete-asset sec-database tracker.db --yes
             new_id="$(gh release view sec-database --json assets --jq ".assets[] | select(.name == \"$temp_asset\") | .id")"
-
-            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${old_id}"
+            test -n "$new_id"
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/${new_id}" -f name="tracker.db"
 
             rm -f "$temp_asset"
