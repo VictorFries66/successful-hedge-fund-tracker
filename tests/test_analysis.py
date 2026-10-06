@@ -73,7 +73,11 @@ class AnalysisTests(unittest.TestCase):
             ],
         )
         self.conn.executemany(
-            "INSERT INTO filings_13f VALUES (?, ?, ?, ?, ?)",
+            """INSERT INTO filings_13f
+            (id, fund_id, accession_number, filing_date, reporting_date, form_type,
+             sec_cik, sec_url, raw_file_path, filing_status, report_type,
+             filing_manager_name, form_13f_file_number, sec_entity_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 (1, 1, "0000000000-26-000001", "2026-05-15", "2026-03-31", "13F-HR", None, None, None, "parsed", None, None, None, None),
                 (2, 1, "0000000000-26-000002", "2026-08-15", "2026-06-30", "13F-HR", "0001234567", "https://www.sec.gov/example", None, "parsed", "13F-HR", "Alpha Manager", "028-12345", None),
