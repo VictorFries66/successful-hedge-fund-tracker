@@ -32,6 +32,10 @@ jobs:
           if gh release view sec-database --json assets --jq '.assets[] | select(.name == "tracker.db") | .name' | grep -qx "tracker.db"; then
             gh release download sec-database --pattern tracker.db --dir database --clobber
             echo "Restored persistent SEC database from GitHub Release."
+          elif gh release view sec-database --json assets --jq '.assets[] | select(.name == "tracker.db.pending") | .name' | grep -qx "tracker.db.pending"; then
+            gh release download sec-database --pattern tracker.db.pending --dir database --clobber
+            mv database/tracker.db.pending database/tracker.db
+            echo "Restored pending SEC database from GitHub Release."
           else
             echo "No persistent SEC database found; this run will perform a full historical ingestion."
           fi
@@ -66,24 +70,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Keep a pending copy before replacing tracker.db. If the final
+          # upload fails, the pending copy can be restored on the next run.
+          gh release upload sec-database database/tracker.db --clobber --repo "$GITHUB_REPOSITORY" --pattern "tracker.db.pending"
+
           if gh release view sec-database --json assets --jq '.assets[] | select(.name == "tracker.db") | .name' | grep -qx "tracker.db"; then
-            temp_asset="tracker.db.${GITHUB_RUN_ID}"
-            cp database/tracker.db "$temp_asset"
-
-            # Upload under a temporary name first so a failed upload cannot
-            # destroy the previous known-good database.
-            gh release upload sec-database "$temp_asset"
-
-            # Replace the old asset using the GitHub CLI's release-asset
-            # command, then rename the new asset through the REST API.
             gh release delete-asset sec-database tracker.db --yes
-            new_id="$(gh release view sec-database --json assets --jq ".assets[] | select(.name == \"$temp_asset\") | .id")"
-            test -n "$new_id"
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/${new_id}" -f name="tracker.db"
-
-            rm -f "$temp_asset"
-          else
-            gh release upload sec-database database/tracker.db
           fi
+
+          gh release upload sec-database database/tracker.db
+          gh release delete-asset sec-database tracker.db.pending --yes
 
           echo "Persistent SEC database updated successfully."
