@@ -8,17 +8,37 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: sec-database-update
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - run: pip install -r requirements.txt
+
+      - name: Restore SEC database
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p database
+          if gh release view sec-database --json assets --jq '.assets[] | select(.name == "tracker.db") | .name' | grep -qx "tracker.db"; then
+            gh release download sec-database --pattern tracker.db --dir database --clobber
+            echo "Restored persistent SEC database from GitHub Release."
+          else
+            echo "No persistent SEC database found; this run will perform a full historical ingestion."
+          fi
+
       - name: Initialize SEC database
         run: python -m src.database.seed
+
       - name: Ingest 13F filings
         env:
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
@@ -28,12 +48,33 @@ jobs:
           else
             python -m src.sec.ingest_13f
           fi
+
       - name: Validate Python
         run: python -m compileall -q src
-      - name: Commit database
+
+      - name: Persist SEC database
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f database/tracker.db
-          git diff --cached --quiet || git commit -m "Update SEC 13F data"
-          git push
+          test -s database/tracker.db
+
+          if gh release view sec-database --json assets --jq '.assets[] | select(.name == "tracker.db") | .name' | grep -qx "tracker.db"; then
+            temp_asset="tracker.db.${GITHUB_RUN_ID}"
+            cp database/tracker.db "$temp_asset"
+
+            # Upload the new database under a temporary name first so the
+            # previous known-good database remains available if upload fails.
+            gh release upload sec-database "$temp_asset"
+
+            old_id="$(gh release view sec-database --json assets --jq '.assets[] | select(.name == "tracker.db") | .id')"
+            new_id="$(gh release view sec-database --json assets --jq ".assets[] | select(.name == \"$temp_asset\") | .id")"
+
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${old_id}"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/assets/${new_id}" -f name="tracker.db"
+
+            rm -f "$temp_asset"
+          else
+            gh release upload sec-database database/tracker.db
+          fi
+
+          echo "Persistent SEC database updated successfully."
