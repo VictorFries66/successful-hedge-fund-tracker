@@ -22,9 +22,18 @@ class AnalysisTests(unittest.TestCase):
             CREATE TABLE filings_13f (
                 id INTEGER PRIMARY KEY,
                 fund_id INTEGER NOT NULL,
+                accession_number TEXT NOT NULL,
                 filing_date TEXT NOT NULL,
                 reporting_date TEXT NOT NULL,
-                form_type TEXT NOT NULL
+                form_type TEXT NOT NULL,
+                sec_cik TEXT,
+                sec_url TEXT,
+                raw_file_path TEXT,
+                filing_status TEXT,
+                report_type TEXT,
+                filing_manager_name TEXT,
+                form_13f_file_number TEXT,
+                sec_entity_id INTEGER
             );
             CREATE TABLE holdings_13f (
                 id INTEGER PRIMARY KEY,
@@ -66,9 +75,9 @@ class AnalysisTests(unittest.TestCase):
         self.conn.executemany(
             "INSERT INTO filings_13f VALUES (?, ?, ?, ?, ?)",
             [
-                (1, 1, "2026-05-15", "2026-03-31", "13F-HR"),
-                (2, 1, "2026-08-15", "2026-06-30", "13F-HR"),
-                (3, 2, "2026-08-15", "2026-06-30", "13F-HR"),
+                (1, 1, "0000000000-26-000001", "2026-05-15", "2026-03-31", "13F-HR", None, None, None, "parsed", None, None, None, None),
+                (2, 1, "0000000000-26-000002", "2026-08-15", "2026-06-30", "13F-HR", "0001234567", "https://www.sec.gov/example", None, "parsed", "13F-HR", "Alpha Manager", "028-12345", None),
+                (3, 2, "0000000000-26-000003", "2026-08-15", "2026-06-30", "13F-HR", None, None, None, "parsed", None, None, None, None),
             ],
         )
         self.conn.executemany(
