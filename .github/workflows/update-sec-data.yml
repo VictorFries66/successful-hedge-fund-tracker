@@ -15,15 +15,18 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - run: pip install -r requirements.txt
-
       - name: Run Python tests
         run: python -m unittest discover -s tests -p "test_*.py"
 
@@ -76,12 +79,22 @@ jobs:
       - name: Validate Python
         run: python -m compileall -q src
 
+      - name: Build static dashboard
+        run: python -m src.site.generate
+
+      - name: Verify dashboard
+        run: |
+          test -s _site/index.html
+          test -s _site/13f-analysis.html
+          test -s _site/fund/citadel.html
+          test -s _site/fund/aqr.html
+          grep -q "Citadel" _site/index.html
+          grep -q "13F Portfolio Overlap" _site/13f-analysis.html
+
       - name: Persist SEC database
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Upload a pending copy first. If the final replacement fails,
-          # the pending copy remains available for the next run.
           cp database/tracker.db tracker.db.pending
           gh release upload sec-database tracker.db.pending --clobber
 
@@ -102,3 +115,15 @@ jobs:
 
           rm -f tracker.db.pending
           echo "Persistent SEC database updated successfully."
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload dashboard
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+      - name: Deploy dashboard
+        id: deployment
+        uses: actions/deploy-pages@v4
