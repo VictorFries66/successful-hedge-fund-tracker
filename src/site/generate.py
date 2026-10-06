@@ -39,9 +39,9 @@ def signed_money(value):
         return "—"
     return f"{'-' if value < 0 else '+'}{money(abs(value))}"
 
-def layout(title, body, active=""):
+def layout(title, body, active="", nested=False):
     nav = [("index.html","Hedge Funds","funds"),("13f-analysis.html","13F Analysis","13f"),("13d-analysis.html","13D Analysis","13d")]
-    links = "".join(f'<a class="nav-link {"active" if active == key else ""}" href="{href}">{label}</a>' for href,label,key in nav)
+    prefix = "../" if nested else ""\n    links = "".join(f'<a class="nav-link {"active" if active == key else ""}" href="{prefix}{href}">{label}</a>' for href,label,key in nav)
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{esc(title)} · Successful Hedge Fund Investment Tracker</title><link rel="stylesheet" href="css/style.css"></head>
@@ -75,7 +75,7 @@ def render_fund(conn,slug):
 <section class="info-grid"><div class="info-card"><span>Filing date</span><strong>{esc(detail.filing_date)}</strong></div><div class="info-card"><span>Form</span><strong>{esc(detail.form_type)}</strong></div><div class="info-card"><span>Manager</span><strong>{esc(detail.filing_manager_name or "—")}</strong></div><div class="info-card"><span>13F file number</span><strong>{esc(detail.form_13f_file_number or "—")}</strong></div></section>
 <section class="panel"><div class="section-heading"><div><p class="eyebrow">Portfolio</p><h2>Top 10 holdings</h2></div><span class="period">{esc(detail.reporting_date)}</span></div><div class="table-wrap"><table><thead><tr><th>#</th><th>Security</th><th>Value</th><th>Portfolio</th><th>Shares</th></tr></thead><tbody>{''.join(top)}</tbody></table></div></section>
 <section class="panel"><div class="section-heading"><div><p class="eyebrow">Quarter over quarter</p><h2>Position changes</h2></div><span class="muted">Largest changes by reported value</span></div><div class="table-wrap"><table><thead><tr><th>Security</th><th>Change</th><th>Previous value</th><th>Current value</th><th>Value Δ</th><th>Value %</th><th>Shares %</th></tr></thead><tbody>{''.join(changes)}</tbody></table></div><p class="table-note">Showing the 30 largest changes. 13F data represents reportable long positions and does not show a manager's complete short book.</p></section></main>"""
-    return layout(detail.name,body,"funds")
+    return layout(detail.name,body,"funds",nested=True)
 
 def render_overlap(conn):
     overlaps=portfolio_overlap(conn,min_funds=2)
