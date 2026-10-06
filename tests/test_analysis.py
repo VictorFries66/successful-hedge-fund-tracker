@@ -1,6 +1,7 @@
 import sqlite3
 import unittest
 
+from src.analysis.fund_detail import fund_detail
 from src.analysis.holdings import latest_positions, position_changes, top_positions
 from src.analysis.overlap import portfolio_overlap
 
@@ -85,6 +86,15 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(by_issuer["New Co"].classification, "new")
         self.assertEqual(by_issuer["Old Co"].classification, "exited")
         self.assertEqual(by_issuer["Old Co"].value_change_dollars, -600)
+
+
+    def test_fund_detail_contains_filing_metadata_top_positions_and_changes(self):
+        detail = fund_detail(self.conn, "alpha")
+        self.assertEqual(detail.name, "Alpha")
+        self.assertEqual(detail.reporting_date, "2026-06-30")
+        self.assertEqual(detail.form_type, "13F-HR")
+        self.assertEqual([p.issuer_name for p in detail.top_positions], ["Common Co", "New Co"])
+        self.assertEqual(detail.position_changes[0].classification, "increased")
 
     def test_overlap_finds_common_holdings(self):
         overlap = portfolio_overlap(self.conn, "2026-06-30")
