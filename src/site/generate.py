@@ -80,13 +80,175 @@ def render_fund(conn,slug):
     return layout(detail.name,body,"funds",nested=True)
 
 def render_overlap(conn):
-    overlaps=portfolio_overlap(conn,min_funds=2)
-    dates=conn.execute("SELECT DISTINCT reporting_date FROM latest_13f_by_period ORDER BY reporting_date DESC").fetchall()
-    latest=dates[0]["reporting_date"] if dates else None
-    rows=[f'<tr data-funds="{x.fund_count}"><td><strong>{esc(x.issuer_name)}</strong></td><td>{x.fund_count}</td><td>{money(x.total_value_dollars)}</td><td>{esc(", ".join(x.fund_slugs))}</td></tr>' for x in overlaps[:200]]
-    body=f"""<main class="container"><section class="hero compact"><p class="eyebrow">Cross-fund analysis</p><h1>13F Portfolio Overlap</h1><p>Stocks reported by at least two tracked funds in each fund's latest available 13F period.</p><p class="as-of">Latest reporting period: <strong>{esc(latest or "—")}</strong></p></section><section class="panel"><div class="toolbar"><label>Minimum funds <select id="minFunds"><option value="2" selected>2+</option><option value="3">3+</option><option value="4">4+</option><option value="5">5+</option><option value="6">6+</option><option value="7">7+</option><option value="8">8</option></select></label><span class="muted">Top 200 overlapping securities</span></div><div class="table-wrap"><table id="overlapTable"><thead><tr><th>Security</th><th>Funds</th><th>Total reported value</th><th>Tracked funds</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div></section></main>
-<script>const select=document.getElementById("minFunds");const rows=[...document.querySelectorAll("#overlapTable tbody tr")];select.addEventListener("change",()=>{{const min=Number(select.value);rows.forEach(row=>row.hidden=Number(row.dataset.funds)<min);}});</script>"""
-    return layout("13F Analysis",body,"13f")
+    overlaps = portfolio_overlap(conn, min_funds=1)
+    latest_dates = conn.execute(
+        "SELECT DISTINCT reporting_date FROM latest_13f_by_period ORDER BY reporting_date DESC"
+    ).fetchall()
+    latest = latest_dates[0]["reporting_date"] if latest_dates else None
+
+    funds = conn.execute(
+        "SELECT slug, name FROM funds WHERE active=1 ORDER BY name"
+    ).fetchall()
+    tag_rows = conn.execute(
+        """
+        SELECT f.slug AS fund_slug, st.slug AS tag_slug
+        FROM funds f
+        JOIN fund_strategy_tags fst ON fst.fund_id = f.id
+        JOIN strategy_tags st ON st.id = fst.tag_id
+        WHERE f.active = 1
+        """
+    ).fetchall()
+    fund_tags = {}
+    for row in tag_rows:
+        fund_tags.setdefault(row["fund_slug"], []).append(row["tag_slug"])
+
+    tag_names = dict(
+        conn.execute("SELECT slug, name FROM strategy_tags ORDER BY name").fetchall()
+    )
+
+    data = []
+    for item in overlaps:
+        tags = sorted(
+            {tag for fund in item.fund_slugs for tag in fund_tags.get(fund, [])}
+        )
+        data.append(
+            {
+                "issuer": item.issuer_name,
+                "funds": list(item.fund_slugs),
+                "tags": tags,
+                "value": item.total_value_dollars,
+            }
+        )
+
+    fund_controls = "".join(
+        f'<label class="filter-chip"><input type="checkbox" class="fund-filter" value="{esc(row["slug"])}"><span>{esc(row["name"])}</span></label>'
+        for row in funds
+    )
+    tag_controls = "".join(
+        f'<label class="filter-chip"><input type="checkbox" class="tag-filter" value="{esc(slug)}"><span>{esc(name)}</span></label>'
+        for slug, name in tag_names.items()
+    )
+
+    import json
+    payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
+    fund_name_data = json.dumps(
+        {row["slug"]: row["name"] for row in funds}, separators=(",", ":")
+    )
+
+    body = f"""<main class="container">
+<section class="hero compact"><p class="eyebrow">Cross-fund analysis</p><h1>13F Portfolio Explorer</h1>
+<p>Filter and sort the latest reportable long positions across the eight tracked funds.</p>
+<p class="as-of">Latest reporting period: <strong>{esc(latest or "—")}</strong></p></section>
+
+<section class="panel filter-panel">
+<div class="section-heading"><div><p class="eyebrow">Filters</p><h2>Build your portfolio group</h2></div><button id="clearFilters" class="text-button" type="button">Clear all</button></div>
+<div class="filter-section"><span class="filter-label">Strategy tags</span><div class="filter-chips">{tag_controls}</div></div>
+<div class="filter-section"><span class="filter-label">Funds</span><div class="filter-chips">{fund_controls}</div></div>
+<div class="filter-row">
+<label>Fund match <select id="fundMode"><option value="any">Any selected fund</option><option value="all">All selected funds</option><option value="exact">Exactly these funds</option></select></label>
+<label>Minimum funds <input id="minFunds" type="number" min="1" max="8" value="1"></label>
+<label>Min reported value <input id="minValue" type="number" min="0" step="1000000" placeholder="$0"></label>
+<label>Max reported value <input id="maxValue" type="number" min="0" step="1000000" placeholder="No limit"></label>
+</div>
+</section>
+
+<section class="panel">
+<div class="toolbar"><span id="resultCount" class="muted"></span><label>Sort by <select id="sortBy"><option value="value">Total reported value</option><option value="funds">Number of funds</option><option value="name">Security name</option></select><button id="sortDirection" class="sort-button" type="button" aria-label="Toggle sort direction">↓</button></label></div>
+<div class="table-wrap"><table id="overlapTable"><thead><tr><th>Security</th><th>Funds</th><th>Total reported value</th><th>Tracked funds</th></tr></thead><tbody></tbody></table></div>
+<p id="emptyState" class="empty-state" hidden>No securities match the current filters.</p>
+</section>
+</main>
+<script>
+const securities = {payload};
+const fundNames = {fund_name_data};
+const tableBody = document.querySelector("#overlapTable tbody");
+const resultCount = document.getElementById("resultCount");
+const emptyState = document.getElementById("emptyState");
+const sortBy = document.getElementById("sortBy");
+const sortDirection = document.getElementById("sortDirection");
+let descending = true;
+
+function selected(selector) {{
+  return [...document.querySelectorAll(selector)].filter(x => x.checked).map(x => x.value);
+}}
+
+function matchesFunds(item, selectedFunds, mode) {{
+  if (!selectedFunds.length) return true;
+  const held = new Set(item.funds);
+  if (mode === "all") return selectedFunds.every(f => held.has(f));
+  if (mode === "exact") return held.size === selectedFunds.length && selectedFunds.every(f => held.has(f));
+  return selectedFunds.some(f => held.has(f));
+}}
+
+function render() {{
+  const tags = selected(".tag-filter");
+  const funds = selected(".fund-filter");
+  const mode = document.getElementById("fundMode").value;
+  const minFunds = Number(document.getElementById("minFunds").value || 1);
+  const minValue = Number(document.getElementById("minValue").value || 0);
+  const maxRaw = document.getElementById("maxValue").value;
+  const maxValue = maxRaw === "" ? Infinity : Number(maxRaw);
+  const sort = sortBy.value;
+
+  let filtered = securities.filter(item => {{
+    const tagMatch = !tags.length || tags.some(tag => item.tags.includes(tag));
+    const fundMatch = matchesFunds(item, funds, mode);
+    return tagMatch && fundMatch && item.funds.length >= minFunds &&
+      item.value >= minValue && item.value <= maxValue;
+  }});
+
+  filtered.sort((a, b) => {{
+    let result;
+    if (sort === "name") result = a.issuer.localeCompare(b.issuer);
+    else if (sort === "funds") result = a.funds.length - b.funds.length;
+    else result = a.value - b.value;
+    return descending ? -result : result;
+  }});
+
+  tableBody.innerHTML = filtered.slice(0, 500).map(item =>
+    "<tr><td><strong>" + escapeHtml(item.issuer) + "</strong></td><td>" +
+    item.funds.length + "</td><td>" + formatMoney(item.value) +
+    "</td><td>" + item.funds.map(f => escapeHtml(fundNames[f] || f)).join(", ") + "</td></tr>"
+  ).join("");
+  resultCount.textContent = filtered.length.toLocaleString() +
+    " securities match" + (filtered.length > 500 ? " (showing top 500)" : "");
+  emptyState.hidden = filtered.length !== 0;
+}}
+
+function escapeHtml(value) {{
+  const div = document.createElement("div");
+  div.textContent = value;
+  return div.innerHTML;
+}}
+
+function formatMoney(value) {{
+  if (Math.abs(value) >= 1e9) return "$" + (value / 1e9).toFixed(1) + "B";
+  if (Math.abs(value) >= 1e6) return "$" + (value / 1e6).toFixed(1) + "M";
+  if (Math.abs(value) >= 1e3) return "$" + Math.round(value / 1e3) + "K";
+  return "$" + value.toLocaleString();
+}}
+
+document.querySelectorAll(".tag-filter,.fund-filter,#fundMode,#minFunds,#minValue,#maxValue").forEach(el => {{
+  el.addEventListener("input", render);
+  el.addEventListener("change", render);
+}});
+sortBy.addEventListener("change", render);
+sortDirection.addEventListener("click", () => {{
+  descending = !descending;
+  sortDirection.textContent = descending ? "↓" : "↑";
+  render();
+}});
+document.getElementById("clearFilters").addEventListener("click", () => {{
+  document.querySelectorAll(".tag-filter,.fund-filter").forEach(el => el.checked = false);
+  document.getElementById("fundMode").value = "any";
+  document.getElementById("minFunds").value = "1";
+  document.getElementById("minValue").value = "";
+  document.getElementById("maxValue").value = "";
+  render();
+}});
+render();
+</script>"""
+    return layout("13F Analysis", body, "13f")
 
 def generate(output=DEFAULT_OUTPUT):
     if output.exists():shutil.rmtree(output)
