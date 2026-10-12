@@ -89,7 +89,9 @@ jobs:
           test -s _site/fund/citadel.html
           test -s _site/fund/aqr.html
           grep -q "Citadel" _site/index.html
-          grep -q "13F Portfolio Overlap" _site/13f-analysis.html
+          grep -q "13F Portfolio Explorer" _site/13f-analysis.html
+          grep -q "Strategy tags" _site/13f-analysis.html
+          grep -q "Exactly these funds" _site/13f-analysis.html
 
       - name: Persist SEC database
         env:
