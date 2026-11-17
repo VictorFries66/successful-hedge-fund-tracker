@@ -68,15 +68,50 @@ def render_fund(conn,slug):
     top=[]
     for i,p in enumerate(detail.top_positions,1):
         shares=f"{p.shares_or_principal:,} {esc(p.shares_or_principal_type or '')}" if p.shares_or_principal is not None else "—"
-        top.append(f"<tr><td>{i}</td><td><strong>{esc(p.issuer_name)}</strong><span class='subtle'>{esc(p.title_of_class or '')}</span></td><td>{money(p.value_dollars)}</td><td>{p.portfolio_weight*100:.1f}%</td><td>{shares}</td></tr>")
+        top.append(f"<tr><td data-sort-value=\"{i}\">{i}</td><td data-sort-value=\"{esc(p.issuer_name)}\"><strong>{esc(p.issuer_name)}</strong><span class='subtle'>{esc(p.title_of_class or '')}</span></td><td data-sort-value=\"{p.value_dollars or 0}\">{money(p.value_dollars)}</td><td data-sort-value=\"{p.portfolio_weight * 100}\">{p.portfolio_weight*100:.1f}%</td><td data-sort-value=\"{p.shares_or_principal if p.shares_or_principal is not None else ''}\">{shares}</td></tr>")
     changes=[]
     for c in detail.position_changes[:30]:
-        changes.append(f"<tr><td><strong>{esc(c.issuer_name)}</strong></td><td><span class='status status-{esc(c.classification)}'>{esc(c.classification)}</span></td><td>{money(c.previous_value_dollars)}</td><td>{money(c.value_dollars)}</td><td>{signed_money(c.value_change_dollars)}</td><td>{signed_pct(c.value_change_percent)}</td><td>{signed_pct(c.shares_change_percent)}</td></tr>")
+        changes.append(f"<tr><td data-sort-value=\"{esc(c.issuer_name)}\"><strong>{esc(c.issuer_name)}</strong></td><td data-sort-value=\"{esc(c.classification)}\"><span class='status status-{esc(c.classification)}'>{esc(c.classification)}</span></td><td data-sort-value=\"{c.previous_value_dollars if c.previous_value_dollars is not None else ''}\">{money(c.previous_value_dollars)}</td><td data-sort-value=\"{c.value_dollars if c.value_dollars is not None else ''}\">{money(c.value_dollars)}</td><td data-sort-value=\"{c.value_change_dollars if c.value_change_dollars is not None else ''}\">{signed_money(c.value_change_dollars)}</td><td data-sort-value=\"{c.value_change_percent if c.value_change_percent is not None else ''}\">{signed_pct(c.value_change_percent)}</td><td data-sort-value=\"{c.shares_change_percent if c.shares_change_percent is not None else ''}\">{signed_pct(c.shares_change_percent)}</td></tr>")
     sec=f'<a class="button" href="{esc(detail.sec_url)}" target="_blank" rel="noopener">View SEC filing ↗</a>' if detail.sec_url else ""
     body=f"""<main class="container"><section class="page-heading"><a class="back" href="../index.html">← All funds</a><div class="heading-row"><div><p class="eyebrow">Fund profile</p><h1>{esc(detail.name)}</h1><p class="subtitle">Latest 13F reporting period: {esc(detail.reporting_date)}</p></div>{sec}</div></section>
 <section class="info-grid"><div class="info-card"><span>Filing date</span><strong>{esc(detail.filing_date)}</strong></div><div class="info-card"><span>Form</span><strong>{esc(detail.form_type)}</strong></div><div class="info-card"><span>Manager</span><strong>{esc(detail.filing_manager_name or "—")}</strong></div><div class="info-card"><span>13F file number</span><strong>{esc(detail.form_13f_file_number or "—")}</strong></div></section>
-<section class="panel"><div class="section-heading"><div><p class="eyebrow">Portfolio</p><h2>Top 10 holdings</h2></div><span class="period">{esc(detail.reporting_date)}</span></div><div class="table-wrap"><table><thead><tr><th>#</th><th>Security</th><th>Value</th><th>Portfolio</th><th>Shares</th></tr></thead><tbody>{''.join(top)}</tbody></table></div></section>
-<section class="panel"><div class="section-heading"><div><p class="eyebrow">Quarter over quarter</p><h2>Position changes</h2></div><span class="muted">Largest changes by reported value</span></div><div class="table-wrap"><table><thead><tr><th>Security</th><th>Change</th><th>Previous value</th><th>Current value</th><th>Value Δ</th><th>Value %</th><th>Shares %</th></tr></thead><tbody>{''.join(changes)}</tbody></table></div><p class="table-note">Showing the 30 largest changes. 13F data represents reportable long positions and does not show a manager's complete short book.</p></section></main>"""
+<section class="panel"><div class="section-heading"><div><p class="eyebrow">Portfolio</p><h2>Top 10 holdings</h2></div><span class="period">{esc(detail.reporting_date)}</span></div><div class="table-wrap"><table class="sortable-table"><thead><tr><th data-sort-type="number"><button class="table-sort" type="button"># <span aria-hidden="true">↕</span></button></th><th data-sort-type="text"><button class="table-sort" type="button">Security <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Value <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Portfolio <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Shares <span aria-hidden="true">↕</span></button></th></tr></thead><tbody>{''.join(top)}</tbody></table></div></section>
+<section class="panel"><div class="section-heading"><div><p class="eyebrow">Quarter over quarter</p><h2>Position changes</h2></div><span class="muted">Largest changes by reported value</span></div><div class="table-wrap"><table class="sortable-table"><thead><tr><th data-sort-type="text"><button class="table-sort" type="button">Security <span aria-hidden="true">↕</span></button></th><th data-sort-type="text"><button class="table-sort" type="button">Change <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Previous value <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Current value <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Value Δ <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Value % <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Shares % <span aria-hidden="true">↕</span></button></th></tr></thead><tbody>{''.join(changes)}</tbody></table></div><p class="table-note">Showing the 30 largest changes. 13F data represents reportable long positions and does not show a manager's complete short book.</p></section></main>
+<script>
+document.querySelectorAll("table.sortable-table").forEach(table => {
+  table.querySelectorAll("thead th").forEach((header, columnIndex) => {
+    const button = header.querySelector("button");
+    if (!button) return;
+    button.addEventListener("click", () => {
+      const sameColumn = table.dataset.sortColumn === String(columnIndex);
+      const descending = sameColumn ? table.dataset.sortDirection !== "desc" : true;
+      table.dataset.sortColumn = String(columnIndex);
+      table.dataset.sortDirection = descending ? "desc" : "asc";
+      const type = header.dataset.sortType || "text";
+      const rows = Array.from(table.tBodies[0].rows);
+      rows.sort((a, b) => {
+        const av = a.cells[columnIndex].dataset.sortValue ?? a.cells[columnIndex].textContent.trim();
+        const bv = b.cells[columnIndex].dataset.sortValue ?? b.cells[columnIndex].textContent.trim();
+        let result;
+        if (type === "number") {
+          const an = av === "" ? Number.NEGATIVE_INFINITY : Number(av);
+          const bn = bv === "" ? Number.NEGATIVE_INFINITY : Number(bv);
+          result = an - bn;
+        } else {
+          result = av.localeCompare(bv, undefined, {sensitivity: "base"});
+        }
+        return descending ? -result : result;
+      });
+      rows.forEach(row => table.tBodies[0].appendChild(row));
+      table.querySelectorAll("thead th").forEach((th, index) => {
+        th.setAttribute("aria-sort", index === columnIndex ? (descending ? "descending" : "ascending") : "none");
+        const indicator = th.querySelector("button span");
+        if (indicator) indicator.textContent = index === columnIndex ? (descending ? "↓" : "↑") : "↕";
+      });
+    });
+  });
+});
+</script>"""
     return layout(detail.name,body,"funds",nested=True)
 
 def render_overlap(conn):
