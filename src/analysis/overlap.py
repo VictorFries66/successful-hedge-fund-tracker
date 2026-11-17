@@ -7,6 +7,7 @@ from dataclasses import dataclass
 class Overlap:
     issuer_name: str
     cusip: str | None
+    position_key: str
     fund_slugs: tuple[str, ...]
     fund_count: int
     total_value_dollars: int
@@ -94,6 +95,7 @@ def portfolio_overlap(conn, reporting_date=None, min_funds=2):
         Overlap(
             issuer_name=item["issuer_name"],
             cusip=item["cusip"],
+            position_key=key,
             fund_slugs=tuple(item["fund_slugs"]),
             fund_count=item["fund_count"],
             total_value_dollars=item["total_value_dollars"],
