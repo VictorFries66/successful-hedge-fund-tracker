@@ -173,7 +173,8 @@ def render_overlap(conn):
     body = f"""<main class="container">
 <section class="hero compact"><p class="eyebrow">Cross-fund analysis</p><h1>13F Portfolio Explorer</h1>
 <p>Filter and sort the latest reportable long positions across the eight tracked funds.</p>
-<p class="as-of">Latest reporting period: <strong>{esc(latest or "—")}</strong></p></section>
+<p class="as-of">Latest reporting period: <strong>{esc(latest or "—")}</strong></p>
+<p><a class="guide-link" href="13f-guide.html">How 13F filings work <span aria-hidden="true">→</span></a></p></section>
 
 <section class="panel filter-panel">
 <div class="section-heading"><div><p class="eyebrow">Filters</p><h2>Build your portfolio group</h2></div><button id="clearFilters" class="text-button" type="button">Clear all</button></div>
@@ -285,12 +286,51 @@ render();
 </script>"""
     return layout("13F Analysis", body, "13f")
 
+def render_13f_guide():
+    body = """<main class="container">
+<section class="page-heading"><a class="back" href="13f-analysis.html">← Back to 13F Portfolio Explorer</a>
+<p class="eyebrow">A quick guide</p><h1>How 13F filings work</h1>
+<p class="subtitle">What these reports tell you, when they are published, and how to interpret them.</p></section>
+
+<section class="panel guide-panel"><p class="eyebrow">The basics</p><h2>What is a Form 13F?</h2>
+<p>Form 13F is a quarterly disclosure filed with the U.S. Securities and Exchange Commission (SEC) by certain institutional investment managers. In general, a manager is required to file if it exercises investment discretion over at least $100 million in securities on the SEC's official Section 13(f) securities list, measured on the last trading day of any month in a calendar year.</p>
+<p>It is a disclosure of specified reportable securities—not a complete statement of everything a hedge fund owns or every trade it makes.</p></section>
+
+<section class="panel guide-panel"><p class="eyebrow">The calendar</p><h2>Which time period does a filing cover?</h2>
+<p>Each report is a snapshot of reportable holdings at the end of a calendar quarter:</p>
+<ul><li><strong>March 31</strong> — first quarter</li><li><strong>June 30</strong> — second quarter</li><li><strong>September 30</strong> — third quarter</li><li><strong>December 31</strong> — fourth quarter</li></ul>
+<p>Managers generally have <strong>45 days after quarter-end</strong> to submit the report. That means the information is already several weeks old when it becomes public. For example, a September 30 portfolio is generally due by mid-November.</p>
+<p><strong>Important:</strong> the reporting date and filing date are different. The reporting date tells you when the portfolio was measured; the filing date tells you when the disclosure was submitted.</p></section>
+
+<section class="panel guide-panel"><p class="eyebrow">What is disclosed</p><h2>What does a 13F show?</h2>
+<p>For securities on the SEC's official Section 13(f) list, the information table generally identifies the issuer and security class and reports the number of shares (or principal amount, where applicable) and the reported fair market value as of quarter-end. The list mainly covers certain U.S.-traded stocks and ETFs, and also includes some other securities such as certain options and warrants.</p>
+<ul><li>Which reportable securities the manager reported.</li><li>The reported share or principal amount.</li><li>The reported market value at the end of the quarter.</li><li>Whether a reported position appears, increases, decreases, or disappears compared with another quarter's filing.</li></ul></section>
+
+<section class="panel guide-panel"><p class="eyebrow">What is not disclosed</p><h2>What does a 13F leave out?</h2>
+<ul><li><strong>Short positions:</strong> managers do not report their short equity positions on Form 13F.</li>
+<li><strong>Written options:</strong> short/written put and call options are not reported.</li>
+<li><strong>Many other assets:</strong> assets that are not on the official Section 13(f) list—including cash and many other instruments—are outside the report.</li>
+<li><strong>Live activity:</strong> the filing does not provide a running transaction history, exact trade dates, or the manager's reasoning.</li>
+<li><strong>Some temporarily withheld positions:</strong> the SEC may grant confidential treatment in limited circumstances, so a public filing may not show every position immediately.</li></ul>
+<p>As a result, a 13F should not be treated as the manager's complete portfolio, net exposure, or current positions.</p></section>
+
+<section class="panel guide-panel"><p class="eyebrow">Reading the tracker</p><h2>How to interpret the tables here</h2>
+<ul><li><strong>Top 10 holdings</strong> ranks the largest reported positions by their disclosed value in that filing.</li>
+<li><strong>Position changes</strong> compares two reporting periods. A change in reported dollar value can come from a change in the number of shares, a change in the security's market price, or both.</li>
+<li><strong>New / increased / reduced / exited</strong> describes the change visible between the filings—not necessarily a trade made at the quarter-end price or a complete change in the manager's exposure.</li></ul>
+<p>Use the filing as a delayed clue about where a manager had reportable long exposure, not as a real-time instruction to copy a trade.</p></section>
+
+<section class="guide-source"><p>For the official rules and detailed definitions, see the SEC's <a href="https://www.sec.gov/rules-regulations/staff-guidance/frequently-asked-questions-about-form-13f" target="_blank" rel="noopener">Frequently Asked Questions About Form 13F ↗</a> and the <a href="https://www.sec.gov/about/forms/form13f.pdf" target="_blank" rel="noopener">Form 13F and its instructions ↗</a>.</p></section>
+</main>"""
+    return layout("How 13F Filings Work", body, "13f")
+
 def generate(output=DEFAULT_OUTPUT):
     if output.exists():shutil.rmtree(output)
     (output/"fund").mkdir(parents=True);(output/"css").mkdir(parents=True)
     conn=connect()
     (output/"index.html").write_text(render_overview(conn),encoding="utf-8")
     (output/"13f-analysis.html").write_text(render_overlap(conn),encoding="utf-8")
+    (output/"13f-guide.html").write_text(render_13f_guide(),encoding="utf-8")
     (output/"13d-analysis.html").write_text(layout("13D Analysis",'<main class="container"><section class="hero"><p class="eyebrow">Coming next</p><h1>13D Analysis</h1><p>The 13D layer will be added after the 13F dashboard is complete.</p></section></main>',"13d"),encoding="utf-8")
     for row in conn.execute("SELECT slug FROM funds WHERE active=1 ORDER BY name"):
         page=render_fund(conn,row["slug"])
