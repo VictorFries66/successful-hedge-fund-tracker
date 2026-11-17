@@ -187,8 +187,11 @@ def render_overlap(conn):
             UNION SELECT fund_id, position_key FROM previous_positions
         )
         SELECT f.slug AS fund_slug, k.position_key,
-               cur.shares AS current_shares, prev.shares AS previous_shares
+               CASE WHEN cur.position_key IS NULL THEN 0 ELSE cur.shares END AS current_shares,
+               CASE WHEN prior_fund.fund_id IS NULL THEN NULL
+                    WHEN prev.position_key IS NULL THEN 0 ELSE prev.shares END AS previous_shares
         FROM position_keys k JOIN funds f ON f.id = k.fund_id
+        LEFT JOIN prior prior_fund ON prior_fund.fund_id = k.fund_id
         LEFT JOIN current_positions cur
           ON cur.fund_id = k.fund_id AND cur.position_key = k.position_key
         LEFT JOIN previous_positions prev
@@ -311,7 +314,7 @@ function render() {{
     return descending ? -result : result;
   }});
 
-  tableBody.innerHTML = filtered.slice(0, 500).map(item => {
+  tableBody.innerHTML = filtered.slice(0, 500).map(item => {{
     const shareChange = netShareChange(item, funds, tags);
     const shareText = shareChange === null ? "—" :
       (shareChange > 0 ? "+" : "") + shareChange.toLocaleString() + " shares";
@@ -319,7 +322,7 @@ function render() {{
       item.funds.length + "</td><td>" + formatMoney(item.value) +
       "</td><td>" + shareText + "</td><td>" +
       item.funds.map(f => escapeHtml(fundNames[f] || f)).join(", ") + "</td></tr>";
-  }).join("");
+  }}).join("");
   resultCount.textContent = filtered.length.toLocaleString() +
     " securities match" + (filtered.length > 500 ? " (showing top 500)" : "");
   emptyState.hidden = filtered.length !== 0;
