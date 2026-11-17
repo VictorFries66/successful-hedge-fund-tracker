@@ -78,39 +78,39 @@ def render_fund(conn,slug):
 <section class="panel"><div class="section-heading"><div><p class="eyebrow">Portfolio</p><h2>Top 10 holdings</h2></div><span class="period">{esc(detail.reporting_date)}</span></div><div class="table-wrap"><table class="sortable-table"><thead><tr><th data-sort-type="number"><button class="table-sort" type="button"># <span aria-hidden="true">↕</span></button></th><th data-sort-type="text"><button class="table-sort" type="button">Security <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Value <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Portfolio <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Shares <span aria-hidden="true">↕</span></button></th></tr></thead><tbody>{''.join(top)}</tbody></table></div></section>
 <section class="panel"><div class="section-heading"><div><p class="eyebrow">Quarter over quarter</p><h2>Position changes</h2></div><span class="muted">Largest changes by reported value</span></div><div class="table-wrap"><table class="sortable-table"><thead><tr><th data-sort-type="text"><button class="table-sort" type="button">Security <span aria-hidden="true">↕</span></button></th><th data-sort-type="text"><button class="table-sort" type="button">Change <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Previous value <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Current value <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Value Δ <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Value % <span aria-hidden="true">↕</span></button></th><th data-sort-type="number"><button class="table-sort" type="button">Shares % <span aria-hidden="true">↕</span></button></th></tr></thead><tbody>{''.join(changes)}</tbody></table></div><p class="table-note">Showing the 30 largest changes. 13F data represents reportable long positions and does not show a manager's complete short book.</p></section></main>
 <script>
-document.querySelectorAll("table.sortable-table").forEach(table => {
-  table.querySelectorAll("thead th").forEach((header, columnIndex) => {
+document.querySelectorAll("table.sortable-table").forEach(table => {{
+  table.querySelectorAll("thead th").forEach((header, columnIndex) => {{
     const button = header.querySelector("button");
     if (!button) return;
-    button.addEventListener("click", () => {
+    button.addEventListener("click", () => {{
       const sameColumn = table.dataset.sortColumn === String(columnIndex);
       const descending = sameColumn ? table.dataset.sortDirection !== "desc" : true;
       table.dataset.sortColumn = String(columnIndex);
       table.dataset.sortDirection = descending ? "desc" : "asc";
       const type = header.dataset.sortType || "text";
       const rows = Array.from(table.tBodies[0].rows);
-      rows.sort((a, b) => {
+      rows.sort((a, b) => {{
         const av = a.cells[columnIndex].dataset.sortValue ?? a.cells[columnIndex].textContent.trim();
         const bv = b.cells[columnIndex].dataset.sortValue ?? b.cells[columnIndex].textContent.trim();
         let result;
-        if (type === "number") {
+        if (type === "number") {{
           const an = av === "" ? Number.NEGATIVE_INFINITY : Number(av);
           const bn = bv === "" ? Number.NEGATIVE_INFINITY : Number(bv);
           result = an - bn;
-        } else {
-          result = av.localeCompare(bv, undefined, {sensitivity: "base"});
-        }
+        }} else {{
+          result = av.localeCompare(bv, undefined, {{sensitivity: "base"}});
+        }}
         return descending ? -result : result;
-      });
+      }});
       rows.forEach(row => table.tBodies[0].appendChild(row));
-      table.querySelectorAll("thead th").forEach((th, index) => {
+      table.querySelectorAll("thead th").forEach((th, index) => {{
         th.setAttribute("aria-sort", index === columnIndex ? (descending ? "descending" : "ascending") : "none");
         const indicator = th.querySelector("button span");
         if (indicator) indicator.textContent = index === columnIndex ? (descending ? "↓" : "↑") : "↕";
-      });
-    });
-  });
-});
+      }});
+    }});
+  }});
+}});
 </script>"""
     return layout(detail.name,body,"funds",nested=True)
 
