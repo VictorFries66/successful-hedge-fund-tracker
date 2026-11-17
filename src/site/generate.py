@@ -141,6 +141,71 @@ def render_overlap(conn):
         conn.execute("SELECT slug, name FROM strategy_tags ORDER BY name").fetchall()
     )
 
+    # Quarter-over-quarter share changes by security and fund. Principal amounts
+    # are deliberately excluded because they are not share quantities.
+    share_change_rows = conn.execute(
+        """
+        WITH latest AS (
+            SELECT v.fund_id, v.id AS filing_id, v.reporting_date
+            FROM latest_13f_by_period v
+            WHERE v.reporting_date = (
+                SELECT MAX(v2.reporting_date) FROM latest_13f_by_period v2
+                WHERE v2.fund_id = v.fund_id
+            )
+        ),
+        prior AS (
+            SELECT l.fund_id, MAX(v.reporting_date) AS reporting_date
+            FROM latest l JOIN latest_13f_by_period v
+              ON v.fund_id = l.fund_id AND v.reporting_date < l.reporting_date
+            GROUP BY l.fund_id
+        ),
+        current_positions AS (
+            SELECT l.fund_id,
+                   COALESCE(NULLIF(h.cusip, ''), NULLIF(h.figi, ''),
+                       UPPER(TRIM(h.issuer_name)) || '|' ||
+                       COALESCE(UPPER(TRIM(h.title_of_class)), '')) AS position_key,
+                   SUM(CASE WHEN UPPER(COALESCE(h.shares_or_principal_type, '')) IN ('SH', 'SHARES')
+                            THEN h.shares_or_principal END) AS shares
+            FROM latest l JOIN holdings_13f h ON h.filing_id = l.filing_id
+            GROUP BY l.fund_id, position_key
+        ),
+        previous_positions AS (
+            SELECT p.fund_id,
+                   COALESCE(NULLIF(h.cusip, ''), NULLIF(h.figi, ''),
+                       UPPER(TRIM(h.issuer_name)) || '|' ||
+                       COALESCE(UPPER(TRIM(h.title_of_class)), '')) AS position_key,
+                   SUM(CASE WHEN UPPER(COALESCE(h.shares_or_principal_type, '')) IN ('SH', 'SHARES')
+                            THEN h.shares_or_principal END) AS shares
+            FROM prior p
+            JOIN latest_13f_by_period v
+              ON v.fund_id = p.fund_id AND v.reporting_date = p.reporting_date
+            JOIN holdings_13f h ON h.filing_id = v.id
+            GROUP BY p.fund_id, position_key
+        ),
+        position_keys AS (
+            SELECT fund_id, position_key FROM current_positions
+            UNION SELECT fund_id, position_key FROM previous_positions
+        )
+        SELECT f.slug AS fund_slug, k.position_key,
+               cur.shares AS current_shares, prev.shares AS previous_shares
+        FROM position_keys k JOIN funds f ON f.id = k.fund_id
+        LEFT JOIN current_positions cur
+          ON cur.fund_id = k.fund_id AND cur.position_key = k.position_key
+        LEFT JOIN previous_positions prev
+          ON prev.fund_id = k.fund_id AND prev.position_key = k.position_key
+        WHERE f.active = 1
+        """
+    ).fetchall()
+    share_changes_by_key = {}
+    for row in share_change_rows:
+        current_shares = row["current_shares"]
+        previous_shares = row["previous_shares"]
+        if current_shares is None or previous_shares is None:
+            continue
+        share_changes_by_key.setdefault(row["position_key"], {})[row["fund_slug"]] = (
+            int(current_shares) - int(previous_shares)
+        )
+
     data = []
     for item in overlaps:
         tags = sorted(
@@ -152,6 +217,8 @@ def render_overlap(conn):
                 "funds": list(item.fund_slugs),
                 "tags": tags,
                 "value": item.total_value_dollars,
+                "position_key": item.position_key,
+                "share_changes": share_changes_by_key.get(item.position_key, {}),
             }
         )
 
@@ -189,14 +256,16 @@ def render_overlap(conn):
 </section>
 
 <section class="panel">
-<div class="toolbar"><span id="resultCount" class="muted"></span><label>Sort by <select id="sortBy"><option value="value">Total reported value</option><option value="funds">Number of funds</option><option value="name">Security name</option></select><button id="sortDirection" class="sort-button" type="button" aria-label="Toggle sort direction">↓</button></label></div>
-<div class="table-wrap"><table id="overlapTable"><thead><tr><th>Security</th><th>Funds</th><th>Total reported value</th><th>Tracked funds</th></tr></thead><tbody></tbody></table></div>
+<div class="toolbar"><span id="resultCount" class="muted"></span><label>Sort by <select id="sortBy"><option value="value">Total reported value</option><option value="shares">Net share change</option><option value="funds">Number of funds</option><option value="name">Security name</option></select><button id="sortDirection" class="sort-button" type="button" aria-label="Toggle sort direction">↓</button></label></div>
+<div class="table-wrap"><table id="overlapTable"><thead><tr><th>Security</th><th>Funds</th><th>Total reported value</th><th>Net share change</th><th>Tracked funds</th></tr></thead><tbody></tbody></table></div>
+<p class="table-note">Net share change sums comparable quarter-over-quarter share-count changes for funds selected by your filters. Principal-amount positions and positions without comparable share data are excluded. This measures reported holdings changes, not trade volume.</p>
 <p id="emptyState" class="empty-state" hidden>No securities match the current filters.</p>
 </section>
 </main>
 <script>
 const securities = {payload};
 const fundNames = {fund_name_data};
+const fundTags = {json.dumps(fund_tags, separators=(",", ":"))};
 const tableBody = document.querySelector("#overlapTable tbody");
 const resultCount = document.getElementById("resultCount");
 const emptyState = document.getElementById("emptyState");
@@ -237,18 +306,37 @@ function render() {{
     let result;
     if (sort === "name") result = a.issuer.localeCompare(b.issuer);
     else if (sort === "funds") result = a.funds.length - b.funds.length;
+    else if (sort === "shares") result = (netShareChange(a, funds, tags) ?? Number.NEGATIVE_INFINITY) - (netShareChange(b, funds, tags) ?? Number.NEGATIVE_INFINITY);
     else result = a.value - b.value;
     return descending ? -result : result;
   }});
 
-  tableBody.innerHTML = filtered.slice(0, 500).map(item =>
-    "<tr><td><strong>" + escapeHtml(item.issuer) + "</strong></td><td>" +
-    item.funds.length + "</td><td>" + formatMoney(item.value) +
-    "</td><td>" + item.funds.map(f => escapeHtml(fundNames[f] || f)).join(", ") + "</td></tr>"
-  ).join("");
+  tableBody.innerHTML = filtered.slice(0, 500).map(item => {
+    const shareChange = netShareChange(item, funds, tags);
+    const shareText = shareChange === null ? "—" :
+      (shareChange > 0 ? "+" : "") + shareChange.toLocaleString() + " shares";
+    return "<tr><td><strong>" + escapeHtml(item.issuer) + "</strong></td><td>" +
+      item.funds.length + "</td><td>" + formatMoney(item.value) +
+      "</td><td>" + shareText + "</td><td>" +
+      item.funds.map(f => escapeHtml(fundNames[f] || f)).join(", ") + "</td></tr>";
+  }).join("");
   resultCount.textContent = filtered.length.toLocaleString() +
     " securities match" + (filtered.length > 500 ? " (showing top 500)" : "");
   emptyState.hidden = filtered.length !== 0;
+}}
+
+function netShareChange(item, selectedFunds, selectedTags) {{
+  let eligibleFunds = Object.keys(item.share_changes || {{}});
+  if (selectedFunds.length) {{
+    eligibleFunds = eligibleFunds.filter(f => selectedFunds.includes(f));
+  }}
+  if (selectedTags.length) {{
+    eligibleFunds = eligibleFunds.filter(f =>
+      (fundTags[f] || []).some(tag => selectedTags.includes(tag))
+    );
+  }}
+  if (!eligibleFunds.length) return null;
+  return eligibleFunds.reduce((total, fund) => total + item.share_changes[fund], 0);
 }}
 
 function escapeHtml(value) {{
