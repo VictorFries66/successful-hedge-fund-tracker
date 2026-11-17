@@ -1,0 +1,71 @@
+name: Deploy Website
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore SEC database
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p database
+          gh release download sec-database --pattern tracker.db --dir database
+          test -s database/tracker.db
+
+      - name: Validate Python
+        run: python -m compileall -q src
+
+      - name: Build static dashboard
+        run: python -m src.site.generate
+
+      - name: Verify dashboard
+        run: |
+          test -s _site/index.html
+          test -s _site/13f-analysis.html
+          test -s _site/13f-guide.html
+          test -s _site/fund/citadel.html
+          test -s _site/fund/aqr.html
+          grep -q "13F Portfolio Explorer" _site/13f-analysis.html
+          grep -q "How 13F filings work" _site/13f-analysis.html
+          grep -q "45 days after quarter-end" _site/13f-guide.html
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload dashboard artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
